@@ -40,12 +40,13 @@ struct StitchingProfile {
     string projection;
     double hFOV;
     int totalImages;
+    double angularSpacing;
     vector<ImageProfile> images;
 };
 
 // Forward declarations
 vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& images);
-CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images);
+CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile);
 
 // Simple JSON parser for stitching profile
 class SimpleJSONParser {
@@ -278,13 +279,32 @@ public:
             }
         }
 
+        // Parse angular spacing from cameraLayout
+        size_t spacingPos = json.find("\"spacing\"");
+        if (spacingPos != string::npos) {
+            spacingPos = json.find(":", spacingPos);
+            if (spacingPos != string::npos) {
+                spacingPos = json.find_first_not_of(" \t\n\r", spacingPos + 1);
+                if (spacingPos != string::npos) {
+                    size_t endPos = spacingPos;
+                    while (endPos < json.length() && (isdigit(json[endPos]) || json[endPos] == '.' || json[endPos] == '-')) {
+                        endPos++;
+                    }
+                    string spacingStr = json.substr(spacingPos, endPos - spacingPos);
+                    profile.angularSpacing = atof(spacingStr.c_str());
+                }
+            }
+        } else {
+            profile.angularSpacing = 45.0; // Default fallback
+        }
+
         // Parse images array
         profile.images = parseImages(json);
 
         // Debug output to verify parsing
         cout << "Parsed profile - Mode: '" << profile.mode << "', Projection: '" << profile.projection
-             << "', HFOV: " << profile.hFOV << ", TotalImages: " << profile.totalImages
-             << ", Images count: " << profile.images.size() << endl;
+             << "', HFOV: " << profile.hFOV << ", AngularSpacing: " << profile.angularSpacing
+             << ", TotalImages: " << profile.totalImages << ", Images count: " << profile.images.size() << endl;
 
         for (int i = 0; i < profile.images.size() && i < 3; i++) {
             cout << "  Image " << i << ": " << profile.images[i].fileName
@@ -360,7 +380,7 @@ vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& ima
 }
 
 // Geometric stitching function for 360-degree panoramas
-CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images) {
+CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile) {
     cout << "Using geometric 360-degree panoramic stitching..." << endl;
 
     int num_images = src_imgs.size();
@@ -369,55 +389,56 @@ CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, 
         return CImg<unsigned char>();
     }
 
-    // Calculate the output image dimensions
-    // For 360-degree panorama, width should be proportional to the number of images
-    // Each image covers 360/num_images degrees
-    double degrees_per_image = 360.0 / num_images;
-    cout << "Each image covers " << degrees_per_image << " degrees" << endl;
+    // Get values from profile instead of hardcoding
+    double hFOV_degrees = profile.hFOV;
+    double angular_spacing = profile.angularSpacing;
+    double overlap_degrees = hFOV_degrees - angular_spacing;
+
+    cout << "hFOV: " << hFOV_degrees << "°, Angular spacing: " << angular_spacing << "°" << endl;
+    cout << "Overlap between adjacent images: " << overlap_degrees << "°" << endl;
 
     // Calculate output dimensions based on the first image's aspect ratio
     int base_width = src_imgs[0].width();
     int base_height = src_imgs[0].height();
 
-    // For 360-degree panorama, width should be much larger than height
-    // Use a ratio that makes sense for panoramic viewing
-    int output_width = base_width * num_images;  // Each image gets its full width
+    // Calculate the effective width each image contributes (accounting for overlap)
+    // Each image contributes its unique angular coverage
+    double effective_degrees_per_image = angular_spacing;  // Each image's unique contribution
+
+    // Calculate output width based on the unique portion each image contributes
+    // Scale factor: how much of the image width represents the unique angular coverage
+    double scale_factor = effective_degrees_per_image / hFOV_degrees;
+    int output_width = (int)(base_width * scale_factor * num_images);
     int output_height = base_height;  // Keep original height
 
+    cout << "Effective degrees per image (unique): " << effective_degrees_per_image << "°" << endl;
+    cout << "Scale factor: " << scale_factor << endl;
     cout << "Output dimensions: " << output_width << " x " << output_height << endl;
 
     // Create the output image
     CImg<unsigned char> panorama(output_width, output_height, 1, src_imgs[0].spectrum(), 0);
 
-    // Calculate the width each image should occupy in the output
+    // Calculate the width each image should occupy in the output (for positioning only)
     int image_width = output_width / num_images;
 
-    cout << "Each image will occupy " << image_width << " pixels width" << endl;
+    cout << "Each image will occupy " << image_width << " pixels width in output" << endl;
 
-    // Position each image according to its radial angle
+    // Position each image according to its radial angle (keeping original size)
     for (int i = 0; i < num_images; i++) {
         double angle = images[i].radialAngle;
 
         // Calculate the horizontal position based on angle
-        // 0° should be at the center, then wrap around
         int x_offset = (int)((angle / 360.0) * output_width);
-
-        // Ensure we don't go out of bounds
-        if (x_offset + image_width > output_width) {
-            x_offset = output_width - image_width;
-        }
 
         cout << "Positioning image " << i << " (angle: " << angle << "°) at x=" << x_offset << endl;
 
-        // Resize the source image to fit the allocated width
-        CImg<unsigned char> resized_img = src_imgs[i].get_resize(image_width, output_height);
-
-        // Copy the resized image to the panorama
-        for (int y = 0; y < output_height; y++) {
-            for (int x = 0; x < image_width; x++) {
-                for (int c = 0; c < panorama.spectrum(); c++) {
-                    if (x + x_offset < output_width) {
-                        panorama(x + x_offset, y, 0, c) = resized_img(x, y, 0, c);
+        // Copy the original image (no resizing) to the panorama
+        for (int y = 0; y < output_height && y < src_imgs[i].height(); y++) {
+            for (int x = 0; x < base_width && x < src_imgs[i].width(); x++) {
+                int target_x = x_offset + x;
+                if (target_x >= 0 && target_x < output_width) {
+                    for (int c = 0; c < panorama.spectrum() && c < src_imgs[i].spectrum(); c++) {
+                        panorama(target_x, y, 0, c) = src_imgs[i](x, y, 0, c);
                     }
                 }
             }
@@ -432,43 +453,50 @@ CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, 
     // Blend at the boundaries between images
     for (int i = 0; i < num_images; i++) {
         int x_offset = (int)((images[i].radialAngle / 360.0) * output_width);
-        if (x_offset + image_width > output_width) {
-            x_offset = output_width - image_width;
-        }
 
         // Blend with the next image (wrapping around)
         int next_i = (i + 1) % num_images;
         int next_x_offset = (int)((images[next_i].radialAngle / 360.0) * output_width);
-        if (next_x_offset + image_width > output_width) {
-            next_x_offset = output_width - image_width;
-        }
 
-        // Calculate the seam position (right edge of current image)
-        int seam_x = x_offset + image_width - 1;
+        // Calculate the seam position at the midpoint of overlap
+        // The seam should be at the midpoint between the two image centers
+        int seam_x = (x_offset + next_x_offset) / 2;
 
-        // Apply a simple linear blend in a small region around the seam
-        int blend_width = min(20, image_width / 4);  // Blend over 20 pixels or 1/4 of image width
+        // Calculate overlap region for blending
+        int overlap_start = max(0, min(x_offset, next_x_offset));
+        int overlap_end = min(output_width, max(x_offset + base_width, next_x_offset + base_width));
+        int blend_width = min(100, (overlap_end - overlap_start) / 4);  // Blend over 1/4 of overlap or 100px max
+
+        cout << "Blending seam between images " << i << " and " << next_i << " at x=" << seam_x
+             << " (overlap: " << overlap_start << "-" << overlap_end << ")" << endl;
 
         for (int y = 0; y < output_height; y++) {
             for (int x = max(0, seam_x - blend_width/2); x < min(output_width, seam_x + blend_width/2); x++) {
-                // Calculate blend factor (0 to 1)
+                // Calculate blend factor (0 to 1) - linear blend across the seam
                 double blend_factor = (double)(x - (seam_x - blend_width/2)) / blend_width;
                 blend_factor = max(0.0, min(1.0, blend_factor));
 
                 for (int c = 0; c < panorama.spectrum(); c++) {
                     // Get the color from the current image
-                    unsigned char current_color = panorama(x, y, 0, c);
-
-                    // Get the color from the next image (if it exists at this position)
-                    unsigned char next_color = 0;
-                    int next_x = x - x_offset + next_x_offset;
-                    if (next_x >= 0 && next_x < image_width) {
-                        next_color = panorama(next_x, y, 0, c);
+                    unsigned char current_color = 0;
+                    int current_x = x - x_offset;
+                    if (current_x >= 0 && current_x < base_width) {
+                        current_color = panorama(x, y, 0, c);
                     }
 
-                    // Blend the colors
-                    unsigned char blended_color = (unsigned char)(current_color * (1.0 - blend_factor) + next_color * blend_factor);
-                    panorama(x, y, 0, c) = blended_color;
+                    // Get the color from the next image
+                    unsigned char next_color = 0;
+                    int next_x = x - next_x_offset;
+                    if (next_x >= 0 && next_x < base_width) {
+                        next_color = panorama(x, y, 0, c);
+                    }
+
+                    // Only blend if both images have valid pixels at this location
+                    if (current_x >= 0 && current_x < base_width && next_x >= 0 && next_x < base_width) {
+                        // Blend the colors
+                        unsigned char blended_color = (unsigned char)(current_color * (1.0 - blend_factor) + next_color * blend_factor);
+                        panorama(x, y, 0, c) = blended_color;
+                    }
                 }
             }
         }
@@ -589,7 +617,7 @@ int main(int argc, char **argv) {
 	if (profile.images.size() > 0) {
 		// Use geometric profile-based stitching (no feature detection needed)
 		cout << "Using geometric profile-based stitching..." << endl;
-		res = stitchingWithProfile(src_imgs, ordered_images);
+		res = stitchingWithProfile(src_imgs, ordered_images, profile);
 	} else {
 		// Use traditional feature-based stitching with cylinder projection
 		cout << "Using traditional feature-based stitching..." << endl;
