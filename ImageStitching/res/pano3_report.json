@@ -32,7 +32,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 762
         },
         "blendRegions": {
           "leftBlend": {
@@ -65,7 +65,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 205
         },
         "blendRegions": {
           "leftBlend": {
@@ -98,7 +98,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 635
         },
         "blendRegions": {
           "leftBlend": {
@@ -131,7 +131,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 708
         },
         "blendRegions": {
           "leftBlend": {
@@ -164,7 +164,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 608
         },
         "blendRegions": {
           "leftBlend": {
@@ -197,7 +197,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 689
         },
         "blendRegions": {
           "leftBlend": {
@@ -230,7 +230,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 342
         },
         "blendRegions": {
           "leftBlend": {
@@ -263,7 +263,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 0
+          "totalFeatures": 868
         },
         "blendRegions": {
           "leftBlend": {
@@ -426,8 +426,8 @@
       }
     ],
     "summaryStatistics": {
-      "totalFeatures": 0,
-      "averageFeaturesPerImage": 0,
+      "totalFeatures": 4817,
+      "averageFeaturesPerImage": 602,
       "totalSeamFeatures": 0,
       "averageSeamFeatures": 0
     }

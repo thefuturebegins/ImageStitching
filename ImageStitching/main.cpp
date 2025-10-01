@@ -21,7 +21,7 @@
 #include "Stitching.h"
 #include "ParallaxCorrection.h"
 
-#define FILE_FOLDER "ImageStitching/dataset3/"
+#define FILE_FOLDER "ImageStitching/dataset4/"
 
 using namespace cimg_library;
 using namespace std;
@@ -352,15 +352,14 @@ public:
 
 // Function to load stitching profile
 StitchingProfile loadStitchingProfile(const string& folderPath) {
-    string profilePath = folderPath + "stitching-profile.json";
+    string profilePath = folderPath + "/stitching-profile.json";
+    cout << "Loading stitching profile from: " << profilePath << endl;
     ifstream file(profilePath);
 
     if (!file.is_open()) {
         cout << "No stitching-profile.json found, using default settings" << endl;
         return StitchingProfile();
     }
-
-    cout << "Loading stitching profile from: " << profilePath << endl;
 
     // Read the entire JSON file
     stringstream buffer;
@@ -1092,7 +1091,7 @@ void generateStitchingReport(const CImg<unsigned char>& result, const vector<Ima
 
     report_file << "    \"summaryStatistics\": {\n";
     report_file << "      \"totalFeatures\": " << total_features << ",\n";
-    report_file << "      \"averageFeaturesPerImage\": " << (total_features / images.size()) << ",\n";
+    report_file << "      \"averageFeaturesPerImage\": " << (images.size() > 0 ? total_features / images.size() : 0) << ",\n";
     report_file << "      \"totalSeamFeatures\": " << total_seam_features << ",\n";
     report_file << "      \"averageSeamFeatures\": " << (seam_lines.empty() ? 0 : total_seam_features / seam_lines.size()) << "\n";
     report_file << "    }\n";

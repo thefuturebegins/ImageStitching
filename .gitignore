@@ -17,6 +17,10 @@ bld/
 [Bb]in/
 [Oo]bj/
 
+# External dependencies
+vlfeat/
+vlfeat-*/
+
 # Roslyn cache directories
 *.ide/
 

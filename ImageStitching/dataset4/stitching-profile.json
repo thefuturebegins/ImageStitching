@@ -1,0 +1,97 @@
+{
+  "datasetInfo": {
+    "name": "dataset3",
+    "description": "8-camera 360-degree panoramic stitching dataset",
+    "totalImages": 8,
+    "imageFormat": "rectilinear",
+    "projectionType": "rectilinear",
+    "stitchMode": "360-pano",
+    "horizontalFieldOfView": 64.04
+  },
+  "stitchingParameters": {
+    "mode": "360-pano",
+    "projection": "rectilinear",
+    "hFOV": 64.04,
+    "totalImages": 8,
+    "enableFeatureMatching": true,
+    "enableFeatureVisualization": true
+  },
+  "images": [
+    {
+      "index": 0,
+      "fileNamePrefix": "camera1_",
+      "fileName": "camera1_frame00000.jpg",
+      "radialAngle": 0,
+      "rotation": 0,
+      "description": "North (0°)"
+    },
+    {
+      "index": 1,
+      "fileNamePrefix": "camera2_",
+      "fileName": "camera2_frame00000.jpg",
+      "radialAngle": 45,
+      "rotation": 0,
+      "description": "Northeast (45°)"
+    },
+    {
+      "index": 2,
+      "fileNamePrefix": "camera3_",
+      "fileName": "camera3_frame00000.jpg",
+      "radialAngle": 90,
+      "rotation": 0,
+      "description": "East (90°)"
+    },
+    {
+      "index": 3,
+      "fileNamePrefix": "camera4_",
+      "fileName": "camera4_frame00000.jpg",
+      "radialAngle": 135,
+      "rotation": 0,
+      "description": "Southeast (135°)"
+    },
+    {
+      "index": 4,
+      "fileNamePrefix": "camera5_",
+      "fileName": "camera5_frame00000.jpg",
+      "radialAngle": 180,
+      "rotation": 0,
+      "description": "South (180°)"
+    },
+    {
+      "index": 5,
+      "fileNamePrefix": "camera6_",
+      "fileName": "camera6_frame00000.jpg",
+      "radialAngle": 225,
+      "rotation": 0,
+      "description": "Southwest (225°)"
+    },
+    {
+      "index": 6,
+      "fileNamePrefix": "camera7_",
+      "fileName": "camera7_frame00000.jpg",
+      "radialAngle": 270,
+      "rotation": 0,
+      "description": "West (270°)"
+    },
+    {
+      "index": 7,
+      "fileNamePrefix": "camera8_",
+      "fileName": "camera8_frame00000.jpg",
+      "radialAngle": 315,
+      "rotation": 0,
+      "description": "Northwest (315°)"
+    }
+  ],
+  "cameraLayout": {
+    "arrangement": "circular",
+    "spacing": 45,
+    "totalCoverage": 360,
+    "overlap": "minimal"
+  },
+  "technicalSpecs": {
+    "imageResolution": "variable",
+    "compression": "JPEG",
+    "colorSpace": "RGB",
+    "bitDepth": 8
+  }
+}
