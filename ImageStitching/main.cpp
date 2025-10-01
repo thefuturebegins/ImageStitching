@@ -19,6 +19,7 @@
 #include "Warping.h"
 #include "FileReading.h"
 #include "Stitching.h"
+#include "ParallaxCorrection.h"
 
 #define FILE_FOLDER "ImageStitching/dataset3/"
 
@@ -26,14 +27,7 @@ using namespace cimg_library;
 using namespace std;
 
 // Simple JSON parsing structures for stitching profile
-struct ImageProfile {
-    int index;
-    string fileNamePrefix;
-    string fileName;
-    double radialAngle;
-    double rotation;
-    string description;
-};
+// ImageProfile is now defined in ParallaxCorrection.h
 
 struct StitchingProfile {
     string mode;
@@ -381,7 +375,7 @@ vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& ima
 
 // Geometric stitching function for 360-degree panoramas
 CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile) {
-    cout << "Using geometric 360-degree panoramic stitching..." << endl;
+    cout << "Using geometric 360-degree panoramic stitching with parallax correction..." << endl;
 
     int num_images = src_imgs.size();
     if (num_images == 0) {
@@ -397,16 +391,10 @@ CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, 
     cout << "hFOV: " << hFOV_degrees << "°, Angular spacing: " << angular_spacing << "°" << endl;
     cout << "Overlap between adjacent images: " << overlap_degrees << "°" << endl;
 
-    // Calculate output dimensions based on the first image's aspect ratio
+    // Calculate output dimensions and seam positions first
     int base_width = src_imgs[0].width();
     int base_height = src_imgs[0].height();
-
-    // Calculate the effective width each image contributes (accounting for overlap)
-    // Each image contributes its unique angular coverage
     double effective_degrees_per_image = angular_spacing;  // Each image's unique contribution
-
-    // Calculate output width based on the unique portion each image contributes
-    // Scale factor: how much of the image width represents the unique angular coverage
     double scale_factor = effective_degrees_per_image / hFOV_degrees;
     int output_width = (int)(base_width * scale_factor * num_images);
     int output_height = base_height;  // Keep original height
@@ -414,6 +402,86 @@ CImg<unsigned char> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, 
     cout << "Effective degrees per image (unique): " << effective_degrees_per_image << "°" << endl;
     cout << "Scale factor: " << scale_factor << endl;
     cout << "Output dimensions: " << output_width << " x " << output_height << endl;
+
+    // Calculate seam positions based on angular overlap
+    vector<SeamLine> seam_lines;
+
+    // Calculate overlap in degrees (already calculated above)
+    double seam_offset_degrees = overlap_degrees / 2.0; // 9.52° from center
+
+    // Convert seam offset to pixel position within each image
+    double seam_offset_ratio = seam_offset_degrees / hFOV_degrees; // 9.52° / 64.04° = 0.1486
+    int seam_pixel_offset = (int)(base_width * seam_offset_ratio); // Position from center
+
+    cout << "Overlap: " << overlap_degrees << "°, Seam offset: " << seam_offset_degrees
+         << "°, Pixel offset: " << seam_pixel_offset << " pixels" << endl;
+
+    for (int i = 0; i < num_images; i++) {
+        int next_i = (i + 1) % num_images;
+        int prev_i = (i - 1 + num_images) % num_images;
+
+        // Calculate seam positions within each image
+        int right_seam_x = base_width - seam_pixel_offset; // Right seam of current image
+        int left_seam_x = seam_pixel_offset; // Left seam of current image
+
+        // Create seam line for right seam (current image meets next image)
+        SeamLine right_seam;
+        right_seam.image1_index = i;
+        right_seam.image2_index = next_i;
+        right_seam.confidence = 1.0;
+        for (int y = 0; y < base_height; y += 10) {
+            right_seam.seam_points.push_back(make_pair(right_seam_x, y));
+        }
+        seam_lines.push_back(right_seam);
+
+        // Create seam line for left seam (previous image meets current image)
+        SeamLine left_seam;
+        left_seam.image1_index = prev_i;
+        left_seam.image2_index = i;
+        left_seam.confidence = 1.0;
+        for (int y = 0; y < base_height; y += 10) {
+            left_seam.seam_points.push_back(make_pair(left_seam_x, y));
+        }
+        seam_lines.push_back(left_seam);
+
+        cout << "Image " << i << " - Right seam at pixel " << right_seam_x
+             << " (meets image " << next_i << "), Left seam at pixel " << left_seam_x
+             << " (meets image " << prev_i << ")" << endl;
+    }
+
+    // Apply parallax correction using the calculated seam lines
+    cout << "Applying parallax correction with calculated seam lines..." << endl;
+
+    // Extract features for parallax correction
+    vector<map<vector<float>, VlSiftKeypoint>> features_for_parallax(num_images);
+    for (int i = 0; i < num_images; i++) {
+        CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
+        features_for_parallax[i] = getFeatureFromImage(gray);
+        cout << "Extracted " << features_for_parallax[i].size() << " features from image " << i << endl;
+    }
+
+    // Apply parallax correction using calculated seam lines
+    vector<CImg<unsigned char>> corrected_imgs = ParallaxCorrection::correctParallaxWithProfile(
+        src_imgs, images, features_for_parallax
+    );
+
+    // Create feature visualization
+    cout << "Creating feature visualization..." << endl;
+    CImg<unsigned char> feature_viz = ParallaxCorrection::createFeatureVisualization(
+        src_imgs, images, seam_lines, features_for_parallax
+    );
+
+    // Save feature visualization
+    if (!feature_viz.is_empty()) {
+        feature_viz.save("ImageStitching/res/pano3_feature_matches.jpg");
+        cout << "Feature visualization saved to pano3_feature_matches.jpg" << endl;
+    }
+
+    // Use corrected images for the rest of the stitching process
+    src_imgs = corrected_imgs;
+    cout << "Parallax correction completed, proceeding with geometric stitching..." << endl;
+
+    // Output dimensions already calculated above
 
     // Create the output image
     CImg<unsigned char> panorama(output_width, output_height, 1, src_imgs[0].spectrum(), 0);
