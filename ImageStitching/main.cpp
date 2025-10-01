@@ -627,8 +627,35 @@ int main(int argc, char **argv) {
 
 	// res.display(); // Display disabled for headless operation
 	cout << "Saving result..." << endl;
-	res.save("ImageStitching/res/pano3.jpg");
-	cout << "Result saved to ImageStitching/res/pano3.jpg" << endl;
+
+	// Generate unique filename with incremental suffix if file exists
+	string base_filename = "ImageStitching/res/pano3.jpg";
+	string filename = base_filename;
+	int counter = 0;
+
+	// Check if file exists and generate unique name
+	while (true) {
+		ifstream file_check(filename);
+		if (!file_check.good()) {
+			// File doesn't exist, we can use this name
+			break;
+		}
+		file_check.close();
+
+		// File exists, generate new name with counter
+		counter++;
+		size_t dot_pos = base_filename.find_last_of(".");
+		if (dot_pos != string::npos) {
+			string name_part = base_filename.substr(0, dot_pos);
+			string ext_part = base_filename.substr(dot_pos);
+			filename = name_part + "_" + to_string(counter).insert(0, 3 - to_string(counter).length(), '0') + ext_part;
+		} else {
+			filename = base_filename + "_" + to_string(counter).insert(0, 3 - to_string(counter).length(), '0');
+		}
+	}
+
+	res.save(filename.c_str());
+	cout << "Result saved to " << filename << endl;
 
 	return 0;
 }
