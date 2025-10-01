@@ -1,7 +1,12 @@
 #ifndef _FILEREADING_H_
 #define _FILEREADING_H_
 
+#ifdef _WIN32
 #include <io.h>
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 #include <string>
 #include <vector>
 #include <iostream>

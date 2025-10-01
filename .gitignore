@@ -187,3 +187,15 @@ FakesAssemblies/
 GeneratedArtifacts/
 _Pvt_Extensions/
 ModelManifest.xml
+
+# VLFeat library (third-party dependency)
+vlfeat-master/
+vlfeat.tar.gz
+
+# Compiled binaries and object files
+*.o
+image_stitching
+libvl.dylib
+
+# Makefile (generated for this platform)
+Makefile
