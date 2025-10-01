@@ -462,13 +462,22 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
              << " (" << src_imgs[i].width() << "x" << src_imgs[i].height() << ")" << endl;
     }
 
-    // Test feature matching between adjacent images
-    cout << "\nTesting feature matching between adjacent images:" << endl;
-    for (int i = 0; i < num_images; i++) {
-        int next_i = (i + 1) % num_images;
-        vector<point_pair> test_pairs = getPointPairsFromFeature(features_for_parallax[i], features_for_parallax[next_i]);
-        cout << "Images " << i << " <-> " << next_i << ": " << test_pairs.size() << " feature pairs" << endl;
-    }
+	// Test feature matching between adjacent images with distance constraint
+	cout << "\nTesting feature matching between adjacent images with distance constraint:" << endl;
+	double overlap_ratio = (profile.hFOV - profile.angularSpacing) / profile.hFOV;
+	cout << "Overlap ratio: " << overlap_ratio << " (max distance constraint applied)" << endl;
+
+	for (int i = 0; i < num_images; i++) {
+		int next_i = (i + 1) % num_images;
+		vector<point_pair> test_pairs = getPointPairsFromFeatureWithDistanceConstraint(
+			features_for_parallax[i],
+			features_for_parallax[next_i],
+			src_imgs[i].width(),
+			src_imgs[i].height(),
+			overlap_ratio
+		);
+		cout << "Images " << i << " <-> " << next_i << ": " << test_pairs.size() << " feature pairs" << endl;
+	}
 
     // Apply parallax correction using calculated seam lines
     vector<CImg<unsigned char>> corrected_imgs = ParallaxCorrection::correctParallaxWithProfile(

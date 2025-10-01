@@ -37,8 +37,10 @@ vector<SeamLine> ParallaxCorrection::detectSeamLines(
                 seam.image2_index = j;
                 seam.confidence = 0.0;
 
-                // Find features between the two images
-                vector<point_pair> pairs = getPointPairsFromFeature(features[i], features[j]);
+                // Find features between the two images with distance constraint
+                // Calculate overlap ratio for distance constraint
+                double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+                vector<point_pair> pairs = getPointPairsFromFeatureWithDistanceConstraint(features[i], features[j], images[i].width(), images[i].height(), overlap_ratio);
                 cout << "Found " << pairs.size() << " feature pairs between images " << i << " and " << j << endl;
 
                 if (pairs.size() >= 5) {  // Lower threshold for 8-camera setup
@@ -116,8 +118,9 @@ vector<point_pair> ParallaxCorrection::findSeamFeatures(
 
     vector<point_pair> seam_features;
 
-    // Get all feature pairs between the two images
-    vector<point_pair> all_pairs = getPointPairsFromFeature(features1, features2);
+    // Get all feature pairs between the two images with distance constraint
+    double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+    vector<point_pair> all_pairs = getPointPairsFromFeatureWithDistanceConstraint(features1, features2, img1.width(), img1.height(), overlap_ratio);
 
     // Filter features that are near the seam line
     for (const auto& pair : all_pairs) {
@@ -150,8 +153,9 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
 
     vector<point_pair> seam_features;
 
-    // Get all feature pairs between the two images
-    vector<point_pair> all_pairs = getPointPairsFromFeature(features1, features2);
+    // Get all feature pairs between the two images with distance constraint
+    double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+    vector<point_pair> all_pairs = getPointPairsFromFeatureWithDistanceConstraint(features1, features2, img1.width(), img1.height(), overlap_ratio);
     cout << "Total feature pairs found: " << all_pairs.size() << endl;
 
     // Calculate overlap region for 360-degree panorama
@@ -160,7 +164,7 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
 
     // For 8-camera setup with 45° spacing, overlap is approximately 19° out of 64° FOV
     // This means overlap is about 19/64 = 0.297 of the image width
-    double overlap_ratio = 0.297; // 19° overlap out of 64° FOV
+    // overlap_ratio is already defined above
     int overlap_width = (int)(img_width * overlap_ratio);
 
     // For 360-degree panorama, the overlap regions are not at the edges
@@ -754,10 +758,14 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
     for (const auto& seam : seam_lines) {
         cout << "Visualizing features for seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
 
-        // First, get ALL feature pairs between these images (not just overlap region)
-        vector<point_pair> all_features = getPointPairsFromFeature(
+        // First, get ALL feature pairs between these images with distance constraint
+        double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+        vector<point_pair> all_features = getPointPairsFromFeatureWithDistanceConstraint(
             features[seam.image1_index],
-            features[seam.image2_index]
+            features[seam.image2_index],
+            src_imgs[seam.image1_index].width(),
+            src_imgs[seam.image1_index].height(),
+            overlap_ratio
         );
         cout << "Total feature pairs between images " << seam.image1_index << " and " << seam.image2_index << ": " << all_features.size() << endl;
 

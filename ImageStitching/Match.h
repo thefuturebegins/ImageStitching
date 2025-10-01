@@ -72,6 +72,7 @@ float getXAfterWarping(float x, float y, Parameters H);
 float getYAfterWarping(float x, float y, Parameters H);
 
 vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b);
+vector<point_pair> getPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio);
 Parameters getHomographyFromPoingPairs(const vector<point_pair> &pairs);
 Parameters RANSAC(const vector<point_pair> &pairs);
 

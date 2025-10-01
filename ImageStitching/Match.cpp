@@ -2,6 +2,7 @@
 #include "Match.h"
 #include "Feature.h"
 #include <set>
+#include <cmath>
 
 float getXAfterWarping(float x, float y, Parameters H) {
 	return H.c1 * x + H.c2 * y + H.c3 * x * y + H.c4;
@@ -51,7 +52,20 @@ vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypo
 
 			VlSiftKeypoint left = feature_a.find(des)->second;
 			VlSiftKeypoint right = it->second;
-			res.push_back(point_pair(left, right));
+
+			// Calculate distance between matched features
+			float dx = left.x - right.x;
+			float dy = left.y - right.y;
+			float distance = sqrt(dx * dx + dy * dy);
+
+			// For 360-degree panorama, features should be within a reasonable distance
+			// Use a generous distance threshold based on image dimensions
+			// Assuming images are 3840x2160, use 3/4 of image width as max distance
+			float max_distance = 3840.0f * 0.75f; // 2880 pixels
+
+			if (distance <= max_distance) {
+				res.push_back(point_pair(left, right));
+			}
 		}
 
 		delete[] temp_data;
@@ -64,6 +78,81 @@ vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypo
 	delete[] data;
 	data = NULL;
 
+	return res;
+}
+
+vector<point_pair> getPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio) {
+	VlKDForest* forest = vl_kdforest_new(VL_TYPE_FLOAT, 128, 1, VlDistanceL1);
+
+	float *data = new float[128 * feature_a.size()];
+	int k = 0;
+	for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+		const vector<float> &descriptors = it->first;
+		assert(descriptors.size() == 128);
+
+		for (int i = 0; i < 128; i++) {
+			data[i + 128 * k] = descriptors[i];
+		}
+		k++;
+	}
+
+	vl_kdforest_build(forest, feature_a.size(), data);
+
+	vector<point_pair> res;
+
+	VlKDForestSearcher* searcher = vl_kdforest_new_searcher(forest);
+	VlKDForestNeighbor neighbours[2];
+
+	// Calculate maximum allowed distance based on overlap ratio
+	// For 360-degree panorama, features should be within a reasonable distance
+	int overlap_width = (int)(img_width * overlap_ratio);
+	// Use a much more generous distance constraint - 3x the overlap width
+	// This allows for the fact that in 360-degree panoramas, features might be
+	// further apart due to the circular nature of the arrangement
+	float max_distance = overlap_width * 3.0f;
+
+	cout << "Distance constraint: max_distance = " << max_distance << " pixels (overlap_width = " << overlap_width << ")" << endl;
+
+	for (auto it = feature_b.begin(); it != feature_b.end(); it++){
+		float *temp_data = new float[128];
+
+		for (int i = 0; i < 128; i++) {
+			temp_data[i] = (it->first)[i];
+		}
+
+		int nvisited = vl_kdforestsearcher_query(searcher, neighbours, 2, temp_data);
+
+		float ratio = neighbours[0].distance / neighbours[1].distance;
+		if (ratio < 0.5) {
+			vector<float> des(128);
+			for (int j = 0; j < 128; j++) {
+				des[j] = data[j + neighbours[0].index * 128];
+			}
+
+			VlSiftKeypoint left = feature_a.find(des)->second;
+			VlSiftKeypoint right = it->second;
+
+			// Calculate distance between matched features
+			float dx = left.x - right.x;
+			float dy = left.y - right.y;
+			float distance = sqrt(dx * dx + dy * dy);
+
+			if (distance <= max_distance) {
+				res.push_back(point_pair(left, right));
+			}
+		}
+
+		delete[] temp_data;
+		temp_data = NULL;
+	}
+
+	vl_kdforestsearcher_delete(searcher);
+	vl_kdforest_delete(forest);
+
+	delete[] data;
+	data = NULL;
+
+	cout << "Distance-constrained matching: " << res.size() << " pairs (from " << feature_b.size() << " features)" << endl;
 	return res;
 }
 
@@ -213,7 +302,7 @@ Parameters RANSAC(const vector<point_pair> &pairs) {
 		}
 
 		Parameters H = getHomographyFromPoingPairs(random_pairs);
-		
+
 		vector<int> cur_inliner_indexs = getIndexsOfInliner(pairs, H, seleted_indexs);
 		if (cur_inliner_indexs.size() > max_inliner_indexs.size()) {
 			max_inliner_indexs = cur_inliner_indexs;
