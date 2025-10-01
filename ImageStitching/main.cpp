@@ -35,13 +35,21 @@ struct StitchingProfile {
     double hFOV;
     int totalImages;
     double angularSpacing;
+    bool enableFeatureMatching;
+    bool enableFeatureVisualization;
     vector<ImageProfile> images;
 };
 
 // Forward declarations
 vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& images);
-pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile);
-void generateStitchingReport(const CImg<unsigned char>& result, const vector<ImageProfile>& images, const StitchingProfile& profile, const vector<map<vector<float>, VlSiftKeypoint>>& features, const vector<SeamLine>& seam_lines);
+struct StitchingResult {
+    CImg<unsigned char> panorama;
+    vector<SeamLine> seam_lines;
+    vector<int> left_seam_positions;
+    vector<int> right_seam_positions;
+};
+StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile);
+void generateStitchingReport(const CImg<unsigned char>& result, const vector<ImageProfile>& images, const StitchingProfile& profile, const vector<map<vector<float>, VlSiftKeypoint>>& features, const vector<SeamLine>& seam_lines, const vector<int>& left_seam_positions, const vector<int>& right_seam_positions);
 
 // Simple JSON parser for stitching profile
 class SimpleJSONParser {
@@ -215,6 +223,10 @@ public:
     static StitchingProfile parseProfile(const string& json) {
         StitchingProfile profile;
 
+        // Set default values
+        profile.enableFeatureMatching = true;
+        profile.enableFeatureVisualization = true;
+
         // Simple direct parsing using string search
         // Parse mode
         size_t modePos = json.find("\"mode\":");
@@ -293,13 +305,41 @@ public:
             profile.angularSpacing = 45.0; // Default fallback
         }
 
+        // Parse enableFeatureMatching
+        size_t featureMatchingPos = json.find("\"enableFeatureMatching\":");
+        if (featureMatchingPos != string::npos) {
+            featureMatchingPos = json.find(":", featureMatchingPos);
+            if (featureMatchingPos != string::npos) {
+                featureMatchingPos = json.find_first_not_of(" \t\n\r", featureMatchingPos + 1);
+                if (featureMatchingPos != string::npos) {
+                    string valueStr = json.substr(featureMatchingPos, 4); // "true" or "false"
+                    profile.enableFeatureMatching = (valueStr == "true");
+                }
+            }
+        }
+
+        // Parse enableFeatureVisualization
+        size_t featureVizPos = json.find("\"enableFeatureVisualization\":");
+        if (featureVizPos != string::npos) {
+            featureVizPos = json.find(":", featureVizPos);
+            if (featureVizPos != string::npos) {
+                featureVizPos = json.find_first_not_of(" \t\n\r", featureVizPos + 1);
+                if (featureVizPos != string::npos) {
+                    string valueStr = json.substr(featureVizPos, 4); // "true" or "false"
+                    profile.enableFeatureVisualization = (valueStr == "true");
+                }
+            }
+        }
+
         // Parse images array
         profile.images = parseImages(json);
 
         // Debug output to verify parsing
         cout << "Parsed profile - Mode: '" << profile.mode << "', Projection: '" << profile.projection
              << "', HFOV: " << profile.hFOV << ", AngularSpacing: " << profile.angularSpacing
-             << ", TotalImages: " << profile.totalImages << ", Images count: " << profile.images.size() << endl;
+             << ", TotalImages: " << profile.totalImages << ", Images count: " << profile.images.size()
+             << ", FeatureMatching: " << (profile.enableFeatureMatching ? "enabled" : "disabled")
+             << ", FeatureVisualization: " << (profile.enableFeatureVisualization ? "enabled" : "disabled") << endl;
 
         for (int i = 0; i < profile.images.size() && i < 3; i++) {
             cout << "  Image " << i << ": " << profile.images[i].fileName
@@ -375,13 +415,18 @@ vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& ima
 }
 
 // Geometric stitching function for 360-degree panoramas
-pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile) {
+StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile) {
     cout << "Using geometric 360-degree panoramic stitching with parallax correction..." << endl;
 
     int num_images = src_imgs.size();
     if (num_images == 0) {
         cout << "No images to stitch!" << endl;
-        return make_pair(CImg<unsigned char>(), vector<SeamLine>());
+        StitchingResult result;
+        result.panorama = CImg<unsigned char>();
+        result.seam_lines = vector<SeamLine>();
+        result.left_seam_positions = vector<int>();
+        result.right_seam_positions = vector<int>();
+        return result;
     }
 
     // Get values from profile instead of hardcoding
@@ -407,23 +452,27 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
     // Calculate seam positions based on angular overlap
     vector<SeamLine> seam_lines;
 
-    // Calculate overlap in degrees (already calculated above)
+    // Calculate seam positions once at the beginning
     double seam_offset_degrees = overlap_degrees / 2.0; // 9.52° from center
-
-    // Convert seam offset to pixel position within each image
     double seam_offset_ratio = seam_offset_degrees / hFOV_degrees; // 9.52° / 64.04° = 0.1486
     int seam_pixel_offset = (int)(base_width * seam_offset_ratio); // Position from center
 
     cout << "Overlap: " << overlap_degrees << "°, Seam offset: " << seam_offset_degrees
          << "°, Pixel offset: " << seam_pixel_offset << " pixels" << endl;
 
+    // Store seam positions for each image
+    vector<int> left_seam_positions(num_images);
+    vector<int> right_seam_positions(num_images);
+
+    for (int i = 0; i < num_images; i++) {
+        left_seam_positions[i] = seam_pixel_offset; // Left seam at 570
+        right_seam_positions[i] = base_width - seam_pixel_offset; // Right seam at 3270
+    }
+
+    // Create seam lines using the calculated positions
     for (int i = 0; i < num_images; i++) {
         int next_i = (i + 1) % num_images;
         int prev_i = (i - 1 + num_images) % num_images;
-
-        // Calculate seam positions within each image
-        int right_seam_x = base_width - seam_pixel_offset; // Right seam of current image
-        int left_seam_x = seam_pixel_offset; // Left seam of current image
 
         // Create seam line for right seam (current image meets next image)
         SeamLine right_seam;
@@ -431,7 +480,7 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
         right_seam.image2_index = next_i;
         right_seam.confidence = 1.0;
         for (int y = 0; y < base_height; y += 10) {
-            right_seam.seam_points.push_back(make_pair(right_seam_x, y));
+            right_seam.seam_points.push_back(make_pair(right_seam_positions[i], y));
         }
         seam_lines.push_back(right_seam);
 
@@ -441,64 +490,76 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
         left_seam.image2_index = i;
         left_seam.confidence = 1.0;
         for (int y = 0; y < base_height; y += 10) {
-            left_seam.seam_points.push_back(make_pair(left_seam_x, y));
+            left_seam.seam_points.push_back(make_pair(left_seam_positions[i], y));
         }
         seam_lines.push_back(left_seam);
 
-        cout << "Image " << i << " - Right seam at pixel " << right_seam_x
-             << " (meets image " << next_i << "), Left seam at pixel " << left_seam_x
+        cout << "Image " << i << " - Right seam at pixel " << right_seam_positions[i]
+             << " (meets image " << next_i << "), Left seam at pixel " << left_seam_positions[i]
              << " (meets image " << prev_i << ")" << endl;
     }
 
     // Apply parallax correction using the calculated seam lines
     cout << "Applying parallax correction with calculated seam lines..." << endl;
 
-    // Extract features for parallax correction
     vector<map<vector<float>, VlSiftKeypoint>> features_for_parallax(num_images);
-    for (int i = 0; i < num_images; i++) {
-        CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
-        features_for_parallax[i] = getFeatureFromImage(gray);
-        cout << "Extracted " << features_for_parallax[i].size() << " features from image " << i
-             << " (" << src_imgs[i].width() << "x" << src_imgs[i].height() << ")" << endl;
+    vector<CImg<unsigned char>> corrected_imgs;
+
+    if (profile.enableFeatureMatching) {
+        // Extract features for parallax correction
+        for (int i = 0; i < num_images; i++) {
+            CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
+            features_for_parallax[i] = getFeatureFromImage(gray);
+            cout << "Extracted " << features_for_parallax[i].size() << " features from image " << i
+                 << " (" << src_imgs[i].width() << "x" << src_imgs[i].height() << ")" << endl;
+        }
+
+        // Test feature matching between adjacent images with distance constraint
+        cout << "\nTesting feature matching between adjacent images with distance constraint:" << endl;
+        double overlap_ratio = (profile.hFOV - profile.angularSpacing) / profile.hFOV;
+        cout << "Overlap ratio: " << overlap_ratio << " (max distance constraint applied)" << endl;
+
+        for (int i = 0; i < num_images; i++) {
+            int next_i = (i + 1) % num_images;
+            vector<point_pair> test_pairs = getPointPairsFromFeatureWithDistanceConstraint(
+                features_for_parallax[i],
+                features_for_parallax[next_i],
+                src_imgs[i].width(),
+                src_imgs[i].height(),
+                overlap_ratio
+            );
+            cout << "Images " << i << " <-> " << next_i << ": " << test_pairs.size() << " feature pairs" << endl;
+        }
+
+        // Apply parallax correction using calculated seam lines
+        corrected_imgs = ParallaxCorrection::correctParallaxWithProfile(
+            src_imgs, images, features_for_parallax
+        );
+
+        // Create feature visualization if enabled
+        if (profile.enableFeatureVisualization) {
+            cout << "Creating feature visualization..." << endl;
+            CImg<unsigned char> feature_viz = ParallaxCorrection::createFeatureVisualization(
+                src_imgs, images, seam_lines, features_for_parallax
+            );
+
+            // Save feature visualization
+            if (!feature_viz.is_empty()) {
+                feature_viz.save("ImageStitching/res/pano3_feature_matches.jpg");
+                cout << "Feature visualization saved to pano3_feature_matches.jpg" << endl;
+            }
+        } else {
+            cout << "Feature visualization disabled, skipping..." << endl;
+        }
+
+        // Use corrected images for the rest of the stitching process
+        src_imgs = corrected_imgs;
+        cout << "Parallax correction completed, proceeding with geometric stitching..." << endl;
+    } else {
+        cout << "Feature matching disabled, skipping parallax correction..." << endl;
+        // Use original images without correction
+        corrected_imgs = src_imgs;
     }
-
-	// Test feature matching between adjacent images with distance constraint
-	cout << "\nTesting feature matching between adjacent images with distance constraint:" << endl;
-	double overlap_ratio = (profile.hFOV - profile.angularSpacing) / profile.hFOV;
-	cout << "Overlap ratio: " << overlap_ratio << " (max distance constraint applied)" << endl;
-
-	for (int i = 0; i < num_images; i++) {
-		int next_i = (i + 1) % num_images;
-		vector<point_pair> test_pairs = getPointPairsFromFeatureWithDistanceConstraint(
-			features_for_parallax[i],
-			features_for_parallax[next_i],
-			src_imgs[i].width(),
-			src_imgs[i].height(),
-			overlap_ratio
-		);
-		cout << "Images " << i << " <-> " << next_i << ": " << test_pairs.size() << " feature pairs" << endl;
-	}
-
-    // Apply parallax correction using calculated seam lines
-    vector<CImg<unsigned char>> corrected_imgs = ParallaxCorrection::correctParallaxWithProfile(
-        src_imgs, images, features_for_parallax
-    );
-
-    // Create feature visualization
-    cout << "Creating feature visualization..." << endl;
-    CImg<unsigned char> feature_viz = ParallaxCorrection::createFeatureVisualization(
-        src_imgs, images, seam_lines, features_for_parallax
-    );
-
-    // Save feature visualization
-    if (!feature_viz.is_empty()) {
-        feature_viz.save("ImageStitching/res/pano3_feature_matches.jpg");
-        cout << "Feature visualization saved to pano3_feature_matches.jpg" << endl;
-    }
-
-    // Use corrected images for the rest of the stitching process
-    src_imgs = corrected_imgs;
-    cout << "Parallax correction completed, proceeding with geometric stitching..." << endl;
 
     // Output dimensions already calculated above
 
@@ -537,7 +598,7 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
     // Now apply blending at the seam lines
     cout << "Applying seam blending..." << endl;
 
-    // Blend at the boundaries between images
+    // Blend at the boundaries between images using the pre-calculated seam lines
     for (int i = 0; i < num_images; i++) {
         int x_offset = (int)((images[i].radialAngle / 360.0) * output_width);
 
@@ -545,54 +606,92 @@ pair<CImg<unsigned char>, vector<SeamLine>> stitchingWithProfile(vector<CImg<uns
         int next_i = (i + 1) % num_images;
         int next_x_offset = (int)((images[next_i].radialAngle / 360.0) * output_width);
 
-        // Calculate the seam position at the midpoint of overlap
-        // The seam should be at the midpoint between the two image centers
-        int seam_x = (x_offset + next_x_offset) / 2;
+            // Calculate the actual overlap region where both images have content
+            int overlap_start = max(x_offset, next_x_offset);
+            int overlap_end = min(x_offset + base_width, next_x_offset + base_width);
 
-        // Calculate overlap region for blending
-        int overlap_start = max(0, min(x_offset, next_x_offset));
-        int overlap_end = min(output_width, max(x_offset + base_width, next_x_offset + base_width));
-        int blend_width = min(100, (overlap_end - overlap_start) / 4);  // Blend over 1/4 of overlap or 100px max
+            // Only proceed if there's actually an overlap
+            if (overlap_start < overlap_end) {
+                // Use the centralized seam position from the right seam of current image
+                int seam_x_in_source = right_seam_positions[i];
+                int seam_x = x_offset + seam_x_in_source;
 
-        cout << "Blending seam between images " << i << " and " << next_i << " at x=" << seam_x
-             << " (overlap: " << overlap_start << "-" << overlap_end << ")" << endl;
+            // Use the full overlap region for blending
+            int blend_width = overlap_end - overlap_start;  // Blend over the entire overlap region
 
-        for (int y = 0; y < output_height; y++) {
-            for (int x = max(0, seam_x - blend_width/2); x < min(output_width, seam_x + blend_width/2); x++) {
-                // Calculate blend factor (0 to 1) - linear blend across the seam
-                double blend_factor = (double)(x - (seam_x - blend_width/2)) / blend_width;
-                blend_factor = max(0.0, min(1.0, blend_factor));
+            // Apply linear blending across the entire overlap region
+            int blend_start = overlap_start;
+            int blend_end = overlap_end;
 
-                for (int c = 0; c < panorama.spectrum(); c++) {
-                    // Get the color from the current image
-                    unsigned char current_color = 0;
+            cout << "Blending seam between images " << i << " and " << next_i
+                 << " at x=" << seam_x << " (final render image overlap: " << blend_start << "-" << blend_end
+                 << ", blend_width: " << blend_width << ")" << endl;
+
+            for (int y = 0; y < output_height; y++) {
+                for (int x = blend_start; x < blend_end; x++) {
+                    // Calculate blend factor based on position relative to seam
+                    // blend_factor represents the next image's contribution (0.0 = only current, 1.0 = only next)
+                    // For current image: fade from 100% at left edge to 50% at seam to 0% at right edge
+                    // For next image: fade from 0% at left edge to 50% at seam to 100% at right edge
+                    double blend_factor;
+					blend_factor = 1.0 * (double)(x - blend_start) / (blend_end - blend_start);
+                    blend_factor = max(0.0, min(1.0, blend_factor));
+
+                    // Get the color from the current image at this panorama position
+                    unsigned char current_color[3] = {0, 0, 0};
                     int current_x = x - x_offset;
                     if (current_x >= 0 && current_x < base_width) {
-                        current_color = panorama(x, y, 0, c);
+                        for (int c = 0; c < panorama.spectrum(); c++) {
+                            current_color[c] = src_imgs[i](current_x, y, 0, c);
+                        }
                     }
 
-                    // Get the color from the next image
-                    unsigned char next_color = 0;
+                    // Get the color from the next image at this panorama position
+                    unsigned char next_color[3] = {0, 0, 0};
                     int next_x = x - next_x_offset;
                     if (next_x >= 0 && next_x < base_width) {
-                        next_color = panorama(x, y, 0, c);
+                        for (int c = 0; c < panorama.spectrum(); c++) {
+                            next_color[c] = src_imgs[next_i](next_x, y, 0, c);
+                        }
                     }
 
                     // Only blend if both images have valid pixels at this location
-                    if (current_x >= 0 && current_x < base_width && next_x >= 0 && next_x < base_width) {
-                        // Blend the colors
-                        unsigned char blended_color = (unsigned char)(current_color * (1.0 - blend_factor) + next_color * blend_factor);
-                        panorama(x, y, 0, c) = blended_color;
+                    bool current_valid = (current_x >= 0 && current_x < base_width);
+                    bool next_valid = (next_x >= 0 && next_x < base_width);
+
+                    if (current_valid && next_valid) {
+                        // Blend the colors: current image fades out, next image fades in
+                        for (int c = 0; c < panorama.spectrum(); c++) {
+                            unsigned char blended_color = (unsigned char)(current_color[c] * (1.0 - blend_factor) + next_color[c] * blend_factor);
+                            panorama(x, y, 0, c) = blended_color;
+                        }
+                    } else if (current_valid) {
+                        // Only current image has valid data
+                        for (int c = 0; c < panorama.spectrum(); c++) {
+                            panorama(x, y, 0, c) = current_color[c];
+                        }
+                    } else if (next_valid) {
+                        // Only next image has valid data
+                        for (int c = 0; c < panorama.spectrum(); c++) {
+                            panorama(x, y, 0, c) = next_color[c];
+                        }
                     }
                 }
             }
-        }
 
-        cout << "Blended seam between images " << i << " and " << next_i << endl;
+            cout << "Blended seam between images " << i << " and " << next_i << " (blended " << (blend_end - blend_start) << " pixels)" << endl;
+        } else {
+            cout << "No overlap between images " << i << " and " << next_i << " - skipping blending" << endl;
+        }
     }
 
     cout << "360-degree panoramic stitching completed!" << endl;
-    return make_pair(panorama, seam_lines);
+    StitchingResult result;
+    result.panorama = panorama;
+    result.seam_lines = seam_lines;
+    result.left_seam_positions = left_seam_positions;
+    result.right_seam_positions = right_seam_positions;
+    return result;
 }
 
 int main(int argc, char **argv) {
@@ -700,30 +799,38 @@ int main(int argc, char **argv) {
 		cout << "Projection: " << profile.projection << ", HFOV: " << profile.hFOV << "°" << endl;
 	}
 
-	// Extract features for report generation
+	// Extract features for report generation (only if feature matching is enabled)
 	vector<map<vector<float>, VlSiftKeypoint>> features_for_report;
-	if (profile.images.size() > 0) {
+	if (profile.images.size() > 0 && profile.enableFeatureMatching) {
 		features_for_report.resize(src_imgs.size());
 		for (int i = 0; i < src_imgs.size(); i++) {
 			CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
 			features_for_report[i] = getFeatureFromImage(gray);
 		}
+		cout << "Extracted features for report generation" << endl;
+	} else if (profile.images.size() > 0) {
+		cout << "Feature matching disabled, skipping feature extraction for report" << endl;
 	}
 
 	CImg<unsigned char> res;
 	vector<SeamLine> seam_lines;
+	vector<int> left_seam_positions, right_seam_positions;
 	if (profile.images.size() > 0) {
 		// Use geometric profile-based stitching (no feature detection needed)
 		cout << "Using geometric profile-based stitching..." << endl;
 		auto result = stitchingWithProfile(src_imgs, ordered_images, profile);
-		res = result.first;
-		seam_lines = result.second;
+		res = result.panorama;
+		seam_lines = result.seam_lines;
+		left_seam_positions = result.left_seam_positions;
+		right_seam_positions = result.right_seam_positions;
 	} else {
 		// Use traditional feature-based stitching with cylinder projection
 		cout << "Using traditional feature-based stitching..." << endl;
 		res = stitching(src_imgs);
 		// For traditional stitching, create empty seam lines
 		seam_lines = vector<SeamLine>();
+		left_seam_positions = vector<int>();
+		right_seam_positions = vector<int>();
 	}
 	cout << "Stitching completed successfully!" << endl;
 
@@ -761,13 +868,13 @@ int main(int argc, char **argv) {
 
 	// Generate comprehensive stitching report
 	cout << "Generating stitching report..." << endl;
-	generateStitchingReport(res, ordered_images, profile, features_for_report, seam_lines);
+	generateStitchingReport(res, ordered_images, profile, features_for_report, seam_lines, left_seam_positions, right_seam_positions);
 
 	return 0;
 }
 
 // Generate comprehensive stitching report
-void generateStitchingReport(const CImg<unsigned char>& result, const vector<ImageProfile>& images, const StitchingProfile& profile, const vector<map<vector<float>, VlSiftKeypoint>>& features, const vector<SeamLine>& seam_lines) {
+void generateStitchingReport(const CImg<unsigned char>& result, const vector<ImageProfile>& images, const StitchingProfile& profile, const vector<map<vector<float>, VlSiftKeypoint>>& features, const vector<SeamLine>& seam_lines, const vector<int>& left_seam_positions, const vector<int>& right_seam_positions) {
     ofstream report_file("ImageStitching/res/pano3_report.json");
 
     if (!report_file.is_open()) {
@@ -808,70 +915,123 @@ void generateStitchingReport(const CImg<unsigned char>& result, const vector<Ima
         report_file << "        \"radialAngle\": " << images[i].radialAngle << ",\n";
         report_file << "        \"description\": \"" << images[i].description << "\",\n";
 
-        // Find seam lines for this image
-        vector<SeamLine> left_seams, right_seams;
-        for (const auto& seam : seam_lines) {
-            if (seam.image1_index == i) {
-                right_seams.push_back(seam);
-            }
-            if (seam.image2_index == i) {
-                left_seams.push_back(seam);
-            }
-        }
+        // Use the centralized seam positions
+        int left_seam_x = left_seam_positions[i];
+        int right_seam_x = right_seam_positions[i];
 
         // Left seam line (from previous image)
         report_file << "        \"leftSeam\": {\n";
-        if (!left_seams.empty()) {
-            report_file << "          \"xPosition\": " << left_seams[0].seam_points[0].first << ",\n";
-            report_file << "          \"confidence\": " << left_seams[0].confidence << ",\n";
-            report_file << "          \"pointCount\": " << left_seams[0].seam_points.size() << "\n";
-        } else {
-            report_file << "          \"xPosition\": null,\n";
-            report_file << "          \"confidence\": 0.0,\n";
-            report_file << "          \"pointCount\": 0\n";
-        }
+        report_file << "          \"xPosition\": " << left_seam_x << ",\n";
+        report_file << "          \"confidence\": 1.0,\n";
+        report_file << "          \"pointCount\": 216\n";
         report_file << "        },\n";
 
         // Right seam line (to next image)
         report_file << "        \"rightSeam\": {\n";
-        if (!right_seams.empty()) {
-            report_file << "          \"xPosition\": " << right_seams[0].seam_points[0].first << ",\n";
-            report_file << "          \"confidence\": " << right_seams[0].confidence << ",\n";
-            report_file << "          \"pointCount\": " << right_seams[0].seam_points.size() << "\n";
-        } else {
-            report_file << "          \"xPosition\": null,\n";
-            report_file << "          \"confidence\": 0.0,\n";
-            report_file << "          \"pointCount\": 0\n";
-        }
+        report_file << "          \"xPosition\": " << right_seam_x << ",\n";
+        report_file << "          \"confidence\": 1.0,\n";
+        report_file << "          \"pointCount\": 216\n";
         report_file << "        },\n";
 
         // Feature counts around seam lines
         int left_seam_features = 0, right_seam_features = 0;
 
-        // Count features around left seam
-        if (!left_seams.empty() && i > 0) {
+        // Count features around left seam (only if features are available)
+        if (i > 0 && !features.empty()) {
             int prev_i = (i - 1 + images.size()) % images.size();
+            // Create a dummy seam line for feature counting
+            SeamLine dummy_left_seam;
+            dummy_left_seam.image1_index = prev_i;
+            dummy_left_seam.image2_index = i;
+            dummy_left_seam.confidence = 1.0;
+            for (int y = 0; y < 2160; y += 10) {
+                dummy_left_seam.seam_points.push_back(make_pair(left_seam_x, y));
+            }
+
             vector<point_pair> left_features = ParallaxCorrection::findSeamFeaturesInOverlap(
                 CImg<unsigned char>(), CImg<unsigned char>(), // Dummy images for now
-                features[prev_i], features[i], left_seams[0]
+                features[prev_i], features[i], dummy_left_seam
             );
             left_seam_features = left_features.size();
         }
 
-        // Count features around right seam
-        if (!right_seams.empty() && i < images.size() - 1) {
+        // Count features around right seam (only if features are available)
+        if (i < images.size() - 1 && !features.empty()) {
             int next_i = (i + 1) % images.size();
+            // Create a dummy seam line for feature counting
+            SeamLine dummy_right_seam;
+            dummy_right_seam.image1_index = i;
+            dummy_right_seam.image2_index = next_i;
+            dummy_right_seam.confidence = 1.0;
+            for (int y = 0; y < 2160; y += 10) {
+                dummy_right_seam.seam_points.push_back(make_pair(right_seam_x, y));
+            }
+
             vector<point_pair> right_features = ParallaxCorrection::findSeamFeaturesInOverlap(
                 CImg<unsigned char>(), CImg<unsigned char>(), // Dummy images for now
-                features[i], features[next_i], right_seams[0]
+                features[i], features[next_i], dummy_right_seam
             );
             right_seam_features = right_features.size();
+        }
+
+        // Calculate blend regions for this image
+        int base_width = 3840; // Standard image width
+        int x_offset = (int)((images[i].radialAngle / 360.0) * result.width());
+
+        // Calculate overlap regions with adjacent images
+        int left_blend_start = 0, left_blend_end = 0;
+        int right_blend_start = 0, right_blend_end = 0;
+
+        // Left blend region (with previous image)
+        if (i > 0) {
+            int prev_i = (i - 1 + images.size()) % images.size();
+            int prev_x_offset = (int)((images[prev_i].radialAngle / 360.0) * result.width());
+
+            // Calculate the overlap region between current image and previous image
+            left_blend_start = max(prev_x_offset, x_offset);
+            left_blend_end = min(prev_x_offset + base_width, x_offset + base_width);
+
+            // Ensure valid blend region
+            if (left_blend_start >= left_blend_end) {
+                left_blend_start = 0;
+                left_blend_end = 0;
+            }
+        }
+
+        // Right blend region (with next image)
+        if (i < images.size() - 1) {
+            int next_i = (i + 1) % images.size();
+            int next_x_offset = (int)((images[next_i].radialAngle / 360.0) * result.width());
+
+            // Calculate the overlap region between current image and next image
+            right_blend_start = max(x_offset, next_x_offset);
+            right_blend_end = min(x_offset + base_width, next_x_offset + base_width);
+
+            // Ensure valid blend region
+            if (right_blend_start >= right_blend_end) {
+                right_blend_start = 0;
+                right_blend_end = 0;
+            }
         }
 
         report_file << "        \"featureCounts\": {\n";
         report_file << "          \"leftSeamFeatures\": " << left_seam_features << ",\n";
         report_file << "          \"rightSeamFeatures\": " << right_seam_features << ",\n";
-        report_file << "          \"totalFeatures\": " << features[i].size() << "\n";
+        report_file << "          \"totalFeatures\": " << (features.empty() ? 0 : features[i].size()) << "\n";
+        report_file << "        },\n";
+
+        // Add blend region information
+        report_file << "        \"blendRegions\": {\n";
+        report_file << "          \"leftBlend\": {\n";
+        report_file << "            \"start\": " << left_blend_start << ",\n";
+        report_file << "            \"end\": " << left_blend_end << ",\n";
+        report_file << "            \"width\": " << (left_blend_end - left_blend_start) << "\n";
+        report_file << "          },\n";
+        report_file << "          \"rightBlend\": {\n";
+        report_file << "            \"start\": " << right_blend_start << ",\n";
+        report_file << "            \"end\": " << right_blend_end << ",\n";
+        report_file << "            \"width\": " << (right_blend_end - right_blend_start) << "\n";
+        report_file << "          }\n";
         report_file << "        }\n";
 
         report_file << "      }";
@@ -892,9 +1052,9 @@ void generateStitchingReport(const CImg<unsigned char>& result, const vector<Ima
         report_file << "        \"confidence\": " << seam.confidence << ",\n";
         report_file << "        \"pointCount\": " << seam.seam_points.size() << ",\n";
 
-        // Count features around this seam
+        // Count features around this seam (only if features are available)
         int seam_features = 0;
-        if (seam.image1_index < features.size() && seam.image2_index < features.size()) {
+        if (!features.empty() && seam.image1_index < features.size() && seam.image2_index < features.size()) {
             vector<point_pair> seam_features_vec = ParallaxCorrection::findSeamFeaturesInOverlap(
                 CImg<unsigned char>(), CImg<unsigned char>(), // Dummy images
                 features[seam.image1_index], features[seam.image2_index], seam
@@ -911,18 +1071,22 @@ void generateStitchingReport(const CImg<unsigned char>& result, const vector<Ima
 
     // Summary statistics
     int total_features = 0;
-    for (const auto& feature_map : features) {
-        total_features += feature_map.size();
+    if (!features.empty()) {
+        for (const auto& feature_map : features) {
+            total_features += feature_map.size();
+        }
     }
 
     int total_seam_features = 0;
-    for (const auto& seam : seam_lines) {
-        if (seam.image1_index < features.size() && seam.image2_index < features.size()) {
-            vector<point_pair> seam_features_vec = ParallaxCorrection::findSeamFeaturesInOverlap(
-                CImg<unsigned char>(), CImg<unsigned char>(), // Dummy images
-                features[seam.image1_index], features[seam.image2_index], seam
-            );
-            total_seam_features += seam_features_vec.size();
+    if (!features.empty()) {
+        for (const auto& seam : seam_lines) {
+            if (seam.image1_index < features.size() && seam.image2_index < features.size()) {
+                vector<point_pair> seam_features_vec = ParallaxCorrection::findSeamFeaturesInOverlap(
+                    CImg<unsigned char>(), CImg<unsigned char>(), // Dummy images
+                    features[seam.image1_index], features[seam.image2_index], seam
+                );
+                total_seam_features += seam_features_vec.size();
+            }
         }
     }
 

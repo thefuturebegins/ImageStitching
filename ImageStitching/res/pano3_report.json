@@ -21,81 +21,129 @@
         "description": "North (0°)",
         "leftSeam": {
           "xPosition": 570,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 761
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 0,
+            "end": 0,
+            "width": 0
+          },
+          "rightBlend": {
+            "start": 2698,
+            "end": 3840,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 1,
         "fileName": "camera2_frame00000.jpg",
-        "radialAngle": 315,
-        "description": "Northwest (315°)",
+        "radialAngle": 45,
+        "description": "Northeast (45°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 1017
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 2698,
+            "end": 3840,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 5396,
+            "end": 6538,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 2,
         "fileName": "camera3_frame00000.jpg",
-        "radialAngle": 270,
-        "description": "West (270°)",
+        "radialAngle": 90,
+        "description": "East (90°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 907
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 5396,
+            "end": 6538,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 8094,
+            "end": 9236,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 3,
         "fileName": "camera4_frame00000.jpg",
-        "radialAngle": 225,
-        "description": "Southwest (225°)",
+        "radialAngle": 135,
+        "description": "Southeast (135°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 1008
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 8094,
+            "end": 9236,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 10793,
+            "end": 11934,
+            "width": 1141
+          }
         }
       },
       {
@@ -104,82 +152,130 @@
         "radialAngle": 180,
         "description": "South (180°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 974
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 10793,
+            "end": 11934,
+            "width": 1141
+          },
+          "rightBlend": {
+            "start": 13491,
+            "end": 14633,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 5,
         "fileName": "camera6_frame00000.jpg",
-        "radialAngle": 135,
-        "description": "Southeast (135°)",
+        "radialAngle": 225,
+        "description": "Southwest (225°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 860
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 13491,
+            "end": 14633,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 16189,
+            "end": 17331,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 6,
         "fileName": "camera7_frame00000.jpg",
-        "radialAngle": 90,
-        "description": "East (90°)",
+        "radialAngle": 270,
+        "description": "West (270°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
           "xPosition": 3270,
-          "confidence": 1,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 888
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 16189,
+            "end": 17331,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 18887,
+            "end": 20029,
+            "width": 1142
+          }
         }
       },
       {
         "imageIndex": 7,
         "fileName": "camera8_frame00000.jpg",
-        "radialAngle": 45,
-        "description": "Northeast (45°)",
+        "radialAngle": 315,
+        "description": "Northwest (315°)",
         "leftSeam": {
-          "xPosition": 3270,
-          "confidence": 1,
+          "xPosition": 570,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "rightSeam": {
-          "xPosition": 570,
-          "confidence": 1,
+          "xPosition": 3270,
+          "confidence": 1.0,
           "pointCount": 216
         },
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 858
+          "totalFeatures": 0
+        },
+        "blendRegions": {
+          "leftBlend": {
+            "start": 18887,
+            "end": 20029,
+            "width": 1142
+          },
+          "rightBlend": {
+            "start": 0,
+            "end": 0,
+            "width": 0
+          }
         }
       }
     ],
@@ -330,8 +426,8 @@
       }
     ],
     "summaryStatistics": {
-      "totalFeatures": 7273,
-      "averageFeaturesPerImage": 909,
+      "totalFeatures": 0,
+      "averageFeaturesPerImage": 0,
       "totalSeamFeatures": 0,
       "averageSeamFeatures": 0
     }

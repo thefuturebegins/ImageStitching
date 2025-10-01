@@ -12,7 +12,9 @@
     "mode": "360-pano",
     "projection": "rectilinear",
     "hFOV": 64.04,
-    "totalImages": 8
+    "totalImages": 8,
+    "enableFeatureMatching": false,
+    "enableFeatureVisualization": false
   },
   "images": [
     {
@@ -27,25 +29,25 @@
       "index": 1,
       "fileNamePrefix": "camera2_",
       "fileName": "camera2_frame00000.jpg",
-      "radialAngle": 315,
+      "radialAngle": 45,
       "rotation": 0,
-      "description": "Northwest (315°)"
+      "description": "Northeast (45°)"
     },
     {
       "index": 2,
       "fileNamePrefix": "camera3_",
       "fileName": "camera3_frame00000.jpg",
-      "radialAngle": 270,
+      "radialAngle": 90,
       "rotation": 0,
-      "description": "West (270°)"
+      "description": "East (90°)"
     },
     {
       "index": 3,
       "fileNamePrefix": "camera4_",
       "fileName": "camera4_frame00000.jpg",
-      "radialAngle": 225,
+      "radialAngle": 135,
       "rotation": 0,
-      "description": "Southwest (225°)"
+      "description": "Southeast (135°)"
     },
     {
       "index": 4,
@@ -59,25 +61,25 @@
       "index": 5,
       "fileNamePrefix": "camera6_",
       "fileName": "camera6_frame00000.jpg",
-      "radialAngle": 135,
+      "radialAngle": 225,
       "rotation": 0,
-      "description": "Southeast (135°)"
+      "description": "Southwest (225°)"
     },
     {
       "index": 6,
       "fileNamePrefix": "camera7_",
       "fileName": "camera7_frame00000.jpg",
-      "radialAngle": 90,
+      "radialAngle": 270,
       "rotation": 0,
-      "description": "East (90°)"
+      "description": "West (270°)"
     },
     {
       "index": 7,
       "fileNamePrefix": "camera8_",
       "fileName": "camera8_frame00000.jpg",
-      "radialAngle": 45,
+      "radialAngle": 315,
       "rotation": 0,
-      "description": "Northeast (45°)"
+      "description": "Northwest (315°)"
     }
   ],
   "cameraLayout": {
