@@ -152,8 +152,9 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
 
     // Get all feature pairs between the two images
     vector<point_pair> all_pairs = getPointPairsFromFeature(features1, features2);
+    cout << "Total feature pairs found: " << all_pairs.size() << endl;
 
-    // Calculate overlap region - this is the rightmost part of img1 and leftmost part of img2
+    // Calculate overlap region for 360-degree panorama
     int img_width = img1.width();
     int img_height = img1.height();
 
@@ -162,16 +163,34 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
     double overlap_ratio = 0.297; // 19° overlap out of 64° FOV
     int overlap_width = (int)(img_width * overlap_ratio);
 
-    // Overlap region in img1: rightmost overlap_width pixels
-    int img1_overlap_start = img_width - overlap_width;
-    int img1_overlap_end = img_width;
+    // For 360-degree panorama, the overlap regions are not at the edges
+    // but rather where the images meet in the circular arrangement.
+    // Based on the debug output, features are distributed across the entire image.
+    // Let's use a more generous approach that considers the entire image as potential overlap.
 
-    // Overlap region in img2: leftmost overlap_width pixels
-    int img2_overlap_start = 0;
-    int img2_overlap_end = overlap_width;
+    // For 360-degree panorama, we'll use a more generous overlap region
+    // that covers a larger portion of each image to capture more features
+    int overlap_half_width = overlap_width * 2; // Use 2x overlap width for more coverage
 
+    // For 360-degree panorama, use the center portion of each image as overlap region
+    // This is where adjacent images would meet in the circular arrangement
+    int img1_overlap_start = (img_width - overlap_half_width) / 2;
+    int img1_overlap_end = (img_width + overlap_half_width) / 2;
+
+    // Overlap region in img2: center portion as well
+    int img2_overlap_start = (img_width - overlap_half_width) / 2;
+    int img2_overlap_end = (img_width + overlap_half_width) / 2;
+
+    cout << "Image dimensions: " << img_width << "x" << img_height << endl;
+    cout << "Overlap ratio: " << overlap_ratio << " (19.04°/64.04°)" << endl;
+    cout << "Overlap width: " << overlap_width << " pixels" << endl;
     cout << "Overlap region - img1: [" << img1_overlap_start << "-" << img1_overlap_end
          << "], img2: [" << img2_overlap_start << "-" << img2_overlap_end << "]" << endl;
+
+    // Count features in each region for debugging
+    int features_in_img1_overlap = 0;
+    int features_in_img2_overlap = 0;
+    int features_in_both_overlaps = 0;
 
     // Filter features that are within the overlap region
     for (const auto& pair : all_pairs) {
@@ -184,12 +203,18 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
         bool in_img1_overlap = (x1 >= img1_overlap_start && x1 < img1_overlap_end);
         bool in_img2_overlap = (x2 >= img2_overlap_start && x2 < img2_overlap_end);
 
+        if (in_img1_overlap) features_in_img1_overlap++;
+        if (in_img2_overlap) features_in_img2_overlap++;
         if (in_img1_overlap && in_img2_overlap) {
             seam_features.push_back(pair);
+            features_in_both_overlaps++;
         }
     }
 
-    cout << "Found " << seam_features.size() << " features in overlap region" << endl;
+    cout << "Features in img1 overlap region: " << features_in_img1_overlap << endl;
+    cout << "Features in img2 overlap region: " << features_in_img2_overlap << endl;
+    cout << "Features in both overlap regions: " << features_in_both_overlaps << endl;
+    cout << "Final seam features: " << seam_features.size() << endl;
     return seam_features;
 }
 
@@ -729,7 +754,14 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
     for (const auto& seam : seam_lines) {
         cout << "Visualizing features for seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
 
-        // Find features near this seam (only in overlap region)
+        // First, get ALL feature pairs between these images (not just overlap region)
+        vector<point_pair> all_features = getPointPairsFromFeature(
+            features[seam.image1_index],
+            features[seam.image2_index]
+        );
+        cout << "Total feature pairs between images " << seam.image1_index << " and " << seam.image2_index << ": " << all_features.size() << endl;
+
+        // Also get features in overlap region for comparison
         vector<point_pair> seam_features = findSeamFeaturesInOverlap(
             src_imgs[seam.image1_index],
             src_imgs[seam.image2_index],
@@ -738,8 +770,77 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
             seam
         );
 
-        cout << "Found " << seam_features.size() << " features to visualize" << endl;
+        cout << "Features in overlap region: " << seam_features.size() << endl;
 
+        // Debug: Show positions of first few matched features
+        cout << "First few matched feature positions:" << endl;
+        int count = 0;
+        for (const auto& pair : all_features) {
+            if (count >= 5) break; // Show only first 5
+            int x1 = (int)pair.a.x;
+            int y1 = (int)pair.a.y;
+            int x2 = (int)pair.b.x;
+            int y2 = (int)pair.b.y;
+            cout << "  Feature " << count << ": img1(" << x1 << "," << y1 << ") -> img2(" << x2 << "," << y2 << ")" << endl;
+            count++;
+        }
+
+        // Visualize ALL features first (with smaller, less prominent markers)
+        for (const auto& pair : all_features) {
+            int x1 = (int)pair.a.x;
+            int y1 = (int)pair.a.y;
+            int x2 = (int)pair.b.x;
+            int y2 = (int)pair.b.y;
+
+            // Find positions in the sorted order
+            int pos1 = img_index_to_position[seam.image1_index];
+            int pos2 = img_index_to_position[seam.image2_index];
+
+            // Calculate coordinates in the new layout
+            int global_x1 = pos1 * (image_width + separator_width) + (x1 * image_width) / img_width;
+            int global_x2 = pos2 * (image_width + separator_width) + (x2 * image_width) / img_width;
+            int global_y1 = (y1 * image_height) / img_height;
+            int global_y2 = (y2 * image_height) / img_height;
+
+            // Draw small dots for all features (blue)
+            int dot_size = 8;
+            for (int dy = -dot_size/2; dy <= dot_size/2; dy++) {
+                for (int dx = -dot_size/2; dx <= dot_size/2; dx++) {
+                    int px1 = global_x1 + dx;
+                    int py1 = global_y1 + dy;
+                    int px2 = global_x2 + dx;
+                    int py2 = global_y2 + dy;
+
+                    if (px1 >= 0 && px1 < target_width && py1 >= 0 && py1 < target_height) {
+                        visualization(px1, py1, 0, 0) = 0;   // No red
+                        visualization(px1, py1, 0, 1) = 0;   // No green
+                        visualization(px1, py1, 0, 2) = 255; // Full blue
+                    }
+                    if (px2 >= 0 && px2 < target_width && py2 >= 0 && py2 < target_height) {
+                        visualization(px2, py2, 0, 0) = 0;   // No red
+                        visualization(px2, py2, 0, 1) = 0;   // No green
+                        visualization(px2, py2, 0, 2) = 255; // Full blue
+                    }
+                }
+            }
+
+            // Also draw lines connecting matched features (cyan)
+            if (all_features.size() <= 50) { // Only draw lines if not too many features
+                // Simple line drawing between matched features
+                int steps = max(abs(global_x2 - global_x1), abs(global_y2 - global_y1));
+                for (int i = 0; i <= steps; i++) {
+                    int px = global_x1 + (global_x2 - global_x1) * i / steps;
+                    int py = global_y1 + (global_y2 - global_y1) * i / steps;
+                    if (px >= 0 && px < target_width && py >= 0 && py < target_height) {
+                        visualization(px, py, 0, 0) = 0;   // No red
+                        visualization(px, py, 0, 1) = 255; // Full green
+                        visualization(px, py, 0, 2) = 255; // Full blue (cyan)
+                    }
+                }
+            }
+        }
+
+        // Now highlight features in overlap region with larger, colored boxes
         for (const auto& pair : seam_features) {
             int x1 = (int)pair.a.x;
             int y1 = (int)pair.a.y;
@@ -756,12 +857,11 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
             int global_y1 = (y1 * image_height) / img_height;
             int global_y2 = (y2 * image_height) / img_height;
 
-            cout << "Feature pair: (" << x1 << "," << y1 << ") -> (" << x2 << "," << y2 << ")" << endl;
+            cout << "Overlap feature pair: (" << x1 << "," << y1 << ") -> (" << x2 << "," << y2 << ")" << endl;
             cout << "Global coords: (" << global_x1 << "," << global_y1 << ") -> (" << global_x2 << "," << global_y2 << ")" << endl;
 
             // Draw bounding box for feature in first image (red)
-            int box_size = 30; // Smaller boxes for 4K resolution
-            cout << "Drawing red box at (" << global_x1 << "," << global_y1 << ") with size " << box_size << endl;
+            int box_size = 30; // Larger boxes for overlap features
             for (int dy = -box_size/2; dy <= box_size/2; dy++) {
                 for (int dx = -box_size/2; dx <= box_size/2; dx++) {
                     int px = global_x1 + dx;
@@ -778,7 +878,6 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
             }
 
             // Draw bounding box for feature in second image (yellow)
-            cout << "Drawing yellow box at (" << global_x2 << "," << global_y2 << ") with size " << box_size << endl;
             for (int dy = -box_size/2; dy <= box_size/2; dy++) {
                 for (int dx = -box_size/2; dx <= box_size/2; dx++) {
                     int px = global_x2 + dx;
