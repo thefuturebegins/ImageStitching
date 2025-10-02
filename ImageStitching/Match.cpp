@@ -1,4 +1,11 @@
 #include "stdafx.h"
+
+#ifdef OPENCV_AVAILABLE
+#include <opencv2/opencv.hpp>
+#include <opencv2/features2d.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#endif
+
 #include "Match.h"
 #include "Feature.h"
 #include <set>
@@ -313,4 +320,493 @@ Parameters RANSAC(const vector<point_pair> &pairs) {
 
 	return t;
 
+}
+
+// Unified matching functions for both SIFT and ORB
+vector<unified_point_pair> getUnifiedPointPairsFromFeature(const map<vector<float>, UnifiedKeypoint> &feature_a, const map<vector<float>, UnifiedKeypoint> &feature_b, FeatureAlgorithm algorithm) {
+    vector<unified_point_pair> res;
+    
+    if (algorithm == FeatureAlgorithm::SIFT) {
+        // Use k-d tree for SIFT (same as original implementation)
+        VlKDForest* forest = vl_kdforest_new(VL_TYPE_FLOAT, 128, 1, VlDistanceL1);
+
+        float *data = new float[128 * feature_a.size()];
+        int k = 0;
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            const vector<float> &descriptors = it->first;
+            assert(descriptors.size() == 128);
+
+            for (int i = 0; i < 128; i++) {
+                data[i + 128 * k] = descriptors[i];
+            }
+            k++;
+        }
+
+        vl_kdforest_build(forest, feature_a.size(), data);
+
+        VlKDForestSearcher* searcher = vl_kdforest_new_searcher(forest);
+        VlKDForestNeighbor neighbours[2];
+
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++){
+            float *temp_data = new float[128];
+
+            for (int i = 0; i < 128; i++) {
+                temp_data[i] = (it->first)[i];
+            }
+
+            int nvisited = vl_kdforestsearcher_query(searcher, neighbours, 2, temp_data);
+
+            float ratio = neighbours[0].distance / neighbours[1].distance;
+            if (ratio < 0.5) {
+                vector<float> des(128);
+                for (int j = 0; j < 128; j++) {
+                    des[j] = data[j + neighbours[0].index * 128];
+                }
+
+                UnifiedKeypoint left = feature_a.find(des)->second;
+                UnifiedKeypoint right = it->second;
+
+                // Calculate distance between matched features
+                float dx = left.x - right.x;
+                float dy = left.y - right.y;
+                float distance = sqrt(dx * dx + dy * dy);
+
+                // For 360-degree panorama, features should be within a reasonable distance
+                float max_distance = 3840.0f * 0.75f; // 2880 pixels
+
+                if (distance <= max_distance) {
+                    res.push_back(unified_point_pair(left, right));
+                }
+            }
+
+            delete[] temp_data;
+            temp_data = NULL;
+        }
+
+        vl_kdforestsearcher_delete(searcher);
+        vl_kdforest_delete(forest);
+        delete[] data;
+        data = NULL;
+        
+    } else if (algorithm == FeatureAlgorithm::SURF) {
+#ifdef OPENCV_AVAILABLE
+        // Use OpenCV's BFMatcher for SURF (L2 distance)
+        cv::BFMatcher matcher(cv::NORM_L2);
+        
+        // Convert features to OpenCV format
+        vector<cv::KeyPoint> keypoints_a, keypoints_b;
+        cv::Mat descriptors_a, descriptors_b;
+        
+        // Convert feature_a to OpenCV format
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_a.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_32F);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<float>(0, i) = desc[i];
+            }
+            descriptors_a.push_back(desc_mat);
+        }
+        
+        // Convert feature_b to OpenCV format
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_b.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_32F);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<float>(0, i) = desc[i];
+            }
+            descriptors_b.push_back(desc_mat);
+        }
+        
+        // Match descriptors
+        vector<vector<cv::DMatch>> knn_matches;
+        matcher.knnMatch(descriptors_a, descriptors_b, knn_matches, 2);
+        
+        // Apply Lowe's ratio test
+        for (size_t i = 0; i < knn_matches.size(); i++) {
+            if (knn_matches[i].size() == 2) {
+                const cv::DMatch& match1 = knn_matches[i][0];
+                const cv::DMatch& match2 = knn_matches[i][1];
+                
+                if (match1.distance < 0.7f * match2.distance) {
+                    UnifiedKeypoint left = feature_a.find(vector<float>(descriptors_a.row(match1.queryIdx).begin<float>(), descriptors_a.row(match1.queryIdx).end<float>()))->second;
+                    UnifiedKeypoint right = feature_b.find(vector<float>(descriptors_b.row(match1.trainIdx).begin<float>(), descriptors_b.row(match1.trainIdx).end<float>()))->second;
+                    
+                    // Calculate distance between matched features
+                    float dx = left.x - right.x;
+                    float dy = left.y - right.y;
+                    float distance = sqrt(dx * dx + dy * dy);
+                    
+                    // For 360-degree panorama, features should be within a reasonable distance
+                    float max_distance = 3840.0f * 0.75f; // 2880 pixels
+                    
+                    if (distance <= max_distance) {
+                        res.push_back(unified_point_pair(left, right));
+                    }
+                }
+            }
+        }
+        
+        cout << "SURF matching found " << res.size() << " matches" << endl;
+#else
+        cout << "ERROR: SURF matching requires OpenCV. Please install OpenCV or use SIFT instead." << endl;
+#endif
+        
+    } else if (algorithm == FeatureAlgorithm::ORB) {
+        cout << "DEBUG: Using ORB algorithm for feature matching" << endl;
+#ifdef OPENCV_AVAILABLE
+        // Use OpenCV's BFMatcher for ORB (Hamming distance)
+        cv::BFMatcher matcher(cv::NORM_HAMMING);
+        
+        // Convert features to OpenCV format
+        vector<cv::KeyPoint> keypoints_a, keypoints_b;
+        cv::Mat descriptors_a, descriptors_b;
+        
+        // Convert feature_a to OpenCV format
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_a.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_8U);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<uchar>(0, i) = static_cast<uchar>(desc[i]);
+            }
+            descriptors_a.push_back(desc_mat);
+        }
+        
+        // Convert feature_b to OpenCV format
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_b.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_8U);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<uchar>(0, i) = static_cast<uchar>(desc[i]);
+            }
+            descriptors_b.push_back(desc_mat);
+        }
+        
+        // Match descriptors
+        vector<vector<cv::DMatch>> knn_matches;
+        matcher.knnMatch(descriptors_a, descriptors_b, knn_matches, 2);
+        
+        // Apply Lowe's ratio test
+        for (size_t i = 0; i < knn_matches.size(); i++) {
+            if (knn_matches[i].size() == 2) {
+                const cv::DMatch& match1 = knn_matches[i][0];
+                const cv::DMatch& match2 = knn_matches[i][1];
+                
+                if (match1.distance < 0.7f * match2.distance) {
+                    UnifiedKeypoint left = feature_a.find(vector<float>(descriptors_a.row(match1.queryIdx).begin<uchar>(), descriptors_a.row(match1.queryIdx).end<uchar>()))->second;
+                    UnifiedKeypoint right = feature_b.find(vector<float>(descriptors_b.row(match1.trainIdx).begin<uchar>(), descriptors_b.row(match1.trainIdx).end<uchar>()))->second;
+                    
+                    // Calculate distance between matched features
+                    float dx = left.x - right.x;
+                    float dy = left.y - right.y;
+                    float distance = sqrt(dx * dx + dy * dy);
+                    
+                    // For 360-degree panorama, features should be within a reasonable distance
+                    float max_distance = 3840.0f * 0.75f; // 2880 pixels
+                    
+                    if (distance <= max_distance) {
+                        res.push_back(unified_point_pair(left, right));
+                    }
+                }
+            }
+        }
+        
+        cout << "ORB matching found " << res.size() << " matches" << endl;
+        cout << "DEBUG: ORB matching completed successfully" << endl;
+#else
+        cout << "ERROR: ORB matching requires OpenCV. Please install OpenCV or use SIFT instead." << endl;
+        cout << "DEBUG: ORB matching failed - OpenCV not available" << endl;
+#endif
+    }
+    
+    return res;
+}
+
+vector<unified_point_pair> getUnifiedPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, UnifiedKeypoint> &feature_a, const map<vector<float>, UnifiedKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio, FeatureAlgorithm algorithm) {
+    vector<unified_point_pair> res;
+    
+    if (algorithm == FeatureAlgorithm::SIFT) {
+        // Use k-d tree for SIFT with distance constraint
+        VlKDForest* forest = vl_kdforest_new(VL_TYPE_FLOAT, 128, 1, VlDistanceL1);
+
+        float *data = new float[128 * feature_a.size()];
+        int k = 0;
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            const vector<float> &descriptors = it->first;
+            assert(descriptors.size() == 128);
+
+            for (int i = 0; i < 128; i++) {
+                data[i + 128 * k] = descriptors[i];
+            }
+            k++;
+        }
+
+        vl_kdforest_build(forest, feature_a.size(), data);
+
+        VlKDForestSearcher* searcher = vl_kdforest_new_searcher(forest);
+        VlKDForestNeighbor neighbours[2];
+
+        // Calculate maximum allowed distance based on overlap ratio
+        int overlap_width = (int)(img_width * overlap_ratio);
+        float max_distance = overlap_width * 3.0f;
+
+        cout << "Distance constraint: max_distance = " << max_distance << " pixels (overlap_width = " << overlap_width << ")" << endl;
+
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++){
+            float *temp_data = new float[128];
+
+            for (int i = 0; i < 128; i++) {
+                temp_data[i] = (it->first)[i];
+            }
+
+            int nvisited = vl_kdforestsearcher_query(searcher, neighbours, 2, temp_data);
+
+            float ratio = neighbours[0].distance / neighbours[1].distance;
+            if (ratio < 0.5) {
+                vector<float> des(128);
+                for (int j = 0; j < 128; j++) {
+                    des[j] = data[j + neighbours[0].index * 128];
+                }
+
+                UnifiedKeypoint left = feature_a.find(des)->second;
+                UnifiedKeypoint right = it->second;
+
+                // Calculate distance between matched features
+                float dx = left.x - right.x;
+                float dy = left.y - right.y;
+                float distance = sqrt(dx * dx + dy * dy);
+
+                if (distance <= max_distance) {
+                    res.push_back(unified_point_pair(left, right));
+                }
+            }
+
+            delete[] temp_data;
+            temp_data = NULL;
+        }
+
+        vl_kdforestsearcher_delete(searcher);
+        vl_kdforest_delete(forest);
+        delete[] data;
+        data = NULL;
+        
+    } else if (algorithm == FeatureAlgorithm::SURF) {
+#ifdef OPENCV_AVAILABLE
+        // Use OpenCV's BFMatcher for SURF with distance constraint
+        cv::BFMatcher matcher(cv::NORM_L2);
+        
+        // Convert features to OpenCV format
+        vector<cv::KeyPoint> keypoints_a, keypoints_b;
+        cv::Mat descriptors_a, descriptors_b;
+        
+        // Convert feature_a to OpenCV format
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_a.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_32F);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<float>(0, i) = desc[i];
+            }
+            descriptors_a.push_back(desc_mat);
+        }
+        
+        // Convert feature_b to OpenCV format
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_b.push_back(kp);
+            
+            // Convert descriptor to OpenCV Mat
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_32F);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<float>(0, i) = desc[i];
+            }
+            descriptors_b.push_back(desc_mat);
+        }
+        
+        // Match descriptors
+        vector<vector<cv::DMatch>> knn_matches;
+        matcher.knnMatch(descriptors_a, descriptors_b, knn_matches, 2);
+        
+        // Apply Lowe's ratio test with distance constraint
+        for (size_t i = 0; i < knn_matches.size(); i++) {
+            if (knn_matches[i].size() == 2) {
+                const cv::DMatch& match1 = knn_matches[i][0];
+                const cv::DMatch& match2 = knn_matches[i][1];
+                
+                if (match1.distance < 0.7f * match2.distance) {
+                    UnifiedKeypoint left = feature_a.find(vector<float>(descriptors_a.row(match1.queryIdx).begin<float>(), descriptors_a.row(match1.queryIdx).end<float>()))->second;
+                    UnifiedKeypoint right = feature_b.find(vector<float>(descriptors_b.row(match1.trainIdx).begin<float>(), descriptors_b.row(match1.trainIdx).end<float>()))->second;
+                    
+                    // Calculate distance between matched features
+                    float dx = left.x - right.x;
+                    float dy = left.y - right.y;
+                    float distance = sqrt(dx * dx + dy * dy);
+                    
+                    // Apply distance constraint based on image dimensions and overlap ratio
+                    float max_distance = sqrt(img_width * img_width + img_height * img_height) * overlap_ratio;
+                    
+                    if (distance <= max_distance) {
+                        res.push_back(unified_point_pair(left, right));
+                    }
+                }
+            }
+        }
+        
+        cout << "SURF matching with distance constraint found " << res.size() << " matches" << endl;
+#else
+        cout << "ERROR: SURF matching requires OpenCV. Please install OpenCV or use SIFT instead." << endl;
+#endif
+        
+    } else if (algorithm == FeatureAlgorithm::ORB) {
+        cout << "DEBUG: Using ORB algorithm for feature matching with distance constraint" << endl;
+#ifdef OPENCV_AVAILABLE
+        // Use OpenCV's BFMatcher for ORB with distance constraint
+        cv::BFMatcher matcher(cv::NORM_HAMMING);
+        
+        // Convert features to OpenCV format (same as above)
+        vector<cv::KeyPoint> keypoints_a, keypoints_b;
+        cv::Mat descriptors_a, descriptors_b;
+        
+        // Convert feature_a to OpenCV format
+        for (auto it = feature_a.begin(); it != feature_a.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_a.push_back(kp);
+            
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_8U);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<uchar>(0, i) = static_cast<uchar>(desc[i]);
+            }
+            descriptors_a.push_back(desc_mat);
+        }
+        
+        // Convert feature_b to OpenCV format
+        for (auto it = feature_b.begin(); it != feature_b.end(); it++) {
+            cv::KeyPoint kp(it->second.x, it->second.y, it->second.scale, it->second.angle);
+            keypoints_b.push_back(kp);
+            
+            vector<float> desc = it->first;
+            cv::Mat desc_mat(1, desc.size(), CV_8U);
+            for (size_t i = 0; i < desc.size(); i++) {
+                desc_mat.at<uchar>(0, i) = static_cast<uchar>(desc[i]);
+            }
+            descriptors_b.push_back(desc_mat);
+        }
+        
+        // Match descriptors
+        vector<vector<cv::DMatch>> knn_matches;
+        matcher.knnMatch(descriptors_a, descriptors_b, knn_matches, 2);
+        
+        // Calculate maximum allowed distance based on overlap ratio
+        int overlap_width = (int)(img_width * overlap_ratio);
+        float max_distance = overlap_width * 3.0f;
+        
+        cout << "Distance constraint: max_distance = " << max_distance << " pixels (overlap_width = " << overlap_width << ")" << endl;
+        
+        // Apply Lowe's ratio test and distance constraint
+        for (size_t i = 0; i < knn_matches.size(); i++) {
+            if (knn_matches[i].size() == 2) {
+                const cv::DMatch& match1 = knn_matches[i][0];
+                const cv::DMatch& match2 = knn_matches[i][1];
+                
+                if (match1.distance < 0.7f * match2.distance) {
+                    UnifiedKeypoint left = feature_a.find(vector<float>(descriptors_a.row(match1.queryIdx).begin<uchar>(), descriptors_a.row(match1.queryIdx).end<uchar>()))->second;
+                    UnifiedKeypoint right = feature_b.find(vector<float>(descriptors_b.row(match1.trainIdx).begin<uchar>(), descriptors_b.row(match1.trainIdx).end<uchar>()))->second;
+                    
+                    // Calculate distance between matched features
+                    float dx = left.x - right.x;
+                    float dy = left.y - right.y;
+                    float distance = sqrt(dx * dx + dy * dy);
+                    
+                    if (distance <= max_distance) {
+                        res.push_back(unified_point_pair(left, right));
+                    }
+                }
+            }
+        }
+        
+        cout << "Distance-constrained ORB matching: " << res.size() << " pairs" << endl;
+        cout << "DEBUG: ORB matching with distance constraint completed successfully" << endl;
+#else
+        cout << "ERROR: ORB matching requires OpenCV. Please install OpenCV or use SIFT instead." << endl;
+        cout << "DEBUG: ORB matching with distance constraint failed - OpenCV not available" << endl;
+#endif
+    }
+    
+    return res;
+}
+
+Parameters getHomographyFromUnifiedPointPairs(const vector<unified_point_pair> &pairs) {
+    // Convert unified point pairs to regular point pairs for homography calculation
+    vector<point_pair> regular_pairs;
+    for (const auto& pair : pairs) {
+        // Create SIFT keypoints from unified keypoints
+        VlSiftKeypoint kp_a, kp_b;
+        kp_a.x = pair.a.x;
+        kp_a.y = pair.a.y;
+        kp_a.sigma = pair.a.scale;
+        kp_a.ix = pair.a.ix;
+        kp_a.iy = pair.a.iy;
+        kp_a.o = pair.a.octave;
+        kp_a.is = 0;  // SIFT doesn't have is field in our unified structure
+        
+        kp_b.x = pair.b.x;
+        kp_b.y = pair.b.y;
+        kp_b.sigma = pair.b.scale;
+        kp_b.ix = pair.b.ix;
+        kp_b.iy = pair.b.iy;
+        kp_b.o = pair.b.octave;
+        kp_b.is = 0;  // SIFT doesn't have is field in our unified structure
+        
+        regular_pairs.push_back(point_pair(kp_a, kp_b));
+    }
+    
+    return getHomographyFromPoingPairs(regular_pairs);
+}
+
+Parameters RANSACUnified(const vector<unified_point_pair> &pairs) {
+    // Convert unified point pairs to regular point pairs for RANSAC
+    vector<point_pair> regular_pairs;
+    for (const auto& pair : pairs) {
+        // Create SIFT keypoints from unified keypoints
+        VlSiftKeypoint kp_a, kp_b;
+        kp_a.x = pair.a.x;
+        kp_a.y = pair.a.y;
+        kp_a.sigma = pair.a.scale;
+        kp_a.ix = pair.a.ix;
+        kp_a.iy = pair.a.iy;
+        kp_a.o = pair.a.octave;
+        kp_a.is = 0;  // SIFT doesn't have is field in our unified structure
+        
+        kp_b.x = pair.b.x;
+        kp_b.y = pair.b.y;
+        kp_b.sigma = pair.b.scale;
+        kp_b.ix = pair.b.ix;
+        kp_b.iy = pair.b.iy;
+        kp_b.o = pair.b.octave;
+        kp_b.is = 0;  // SIFT doesn't have is field in our unified structure
+        
+        regular_pairs.push_back(point_pair(kp_a, kp_b));
+    }
+    
+    return RANSAC(regular_pairs);
 }

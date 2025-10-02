@@ -694,6 +694,38 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
 }
 
 int main(int argc, char **argv) {
+	// Parse command line arguments for feature matching algorithm
+	FeatureAlgorithm algorithm = FeatureAlgorithm::SIFT;
+	
+	for (int i = 1; i < argc; i++) {
+		string arg = argv[i];
+		if (arg == "--algorithm" || arg == "-a") {
+			if (i + 1 < argc) {
+				string algo = argv[i + 1];
+				if (algo == "sift" || algo == "SIFT") {
+					algorithm = FeatureAlgorithm::SIFT;
+					cout << "Using SIFT feature matching algorithm" << endl;
+				} else if (algo == "surf" || algo == "SURF") {
+					algorithm = FeatureAlgorithm::SURF;
+					cout << "Using SURF feature matching algorithm" << endl;
+				} else if (algo == "orb" || algo == "ORB") {
+					algorithm = FeatureAlgorithm::ORB;
+					cout << "Using ORB feature matching algorithm: " << algorithm << endl;
+				} else {
+					cout << "Unknown algorithm: " << algo << ". Using SIFT (default)." << endl;
+					cout << "Available algorithms: sift, surf, orb" << endl;
+				}
+				i++; // Skip the next argument as it's the algorithm name
+			}
+		} else if (arg == "--help" || arg == "-h") {
+			cout << "Usage: " << argv[0] << " [options]" << endl;
+			cout << "Options:" << endl;
+			cout << "  --algorithm, -a <algorithm>  Set feature matching algorithm (sift|surf|orb)" << endl;
+			cout << "  --help, -h                   Show this help message" << endl;
+			cout << "Default algorithm: sift" << endl;
+			return 0;
+		}
+	}
 
 	string file_folder(FILE_FOLDER);
 	vector<string> image_files;
@@ -825,7 +857,7 @@ int main(int argc, char **argv) {
 	} else {
 		// Use traditional feature-based stitching with cylinder projection
 		cout << "Using traditional feature-based stitching..." << endl;
-		res = stitching(src_imgs);
+		res = stitching(src_imgs, algorithm);
 		// For traditional stitching, create empty seam lines
 		seam_lines = vector<SeamLine>();
 		left_seam_positions = vector<int>();

@@ -72,9 +72,30 @@ void updateFeaturesByOffset(map<vector<float>, VlSiftKeypoint> &feature, int off
 	}
 }
 
-CImg<unsigned char> stitching(vector<CImg<unsigned char>> &src_imgs) {
+// Overloaded versions for UnifiedKeypoint
+void updateFeaturesByHomography(map<vector<float>, UnifiedKeypoint> &feature, Parameters H, float offset_x, float offset_y) {
+	for (auto iter = feature.begin(); iter != feature.end(); iter++) {
+		float new_x = getXAfterWarping(iter->second.x, iter->second.y, H) + offset_x;
+		float new_y = getYAfterWarping(iter->second.x, iter->second.y, H) + offset_y;
+		iter->second.x = new_x;
+		iter->second.y = new_y;
+		iter->second.ix = int(iter->second.x);
+		iter->second.iy = int(iter->second.y);
+	}
+}
+
+void updateFeaturesByOffset(map<vector<float>, UnifiedKeypoint> &feature, int offset_x, int offset_y) {
+	for (auto iter = feature.begin(); iter != feature.end(); iter++) {
+		iter->second.x -= offset_x;
+		iter->second.y -= offset_y;
+		iter->second.ix = int(iter->second.x);
+		iter->second.iy = int(iter->second.y);
+	}
+}
+
+CImg<unsigned char> stitching(vector<CImg<unsigned char>> &src_imgs, FeatureAlgorithm algorithm) {
 	// Used to save each image's features and corresponding coordinates.
-	vector<map<vector<float>, VlSiftKeypoint>> features(src_imgs.size());
+	vector<map<vector<float>, UnifiedKeypoint>> features(src_imgs.size());
 
 	for (int i = 0; i < src_imgs.size(); i++) {
 		cout << "Preprocessing input image " << i << " ..." << endl;
@@ -85,9 +106,17 @@ CImg<unsigned char> stitching(vector<CImg<unsigned char>> &src_imgs) {
 
 		CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
 
-		cout << "Extracting SIFT feature started." << endl;
-		features[i] = getFeatureFromImage(gray);
-		cout << "Extracting SIFT feature finished." << endl;
+		if (algorithm == FeatureAlgorithm::SIFT) {
+			cout << "Extracting SIFT features started." << endl;
+		} else {
+			cout << "Extracting ORB features started." << endl;
+		}
+		features[i] = getFeatureFromImageUnified(gray, algorithm);
+		if (algorithm == FeatureAlgorithm::SIFT) {
+			cout << "Extracting SIFT features finished." << endl;
+		} else {
+			cout << "Extracting ORB features finished." << endl;
+		}
 
 		cout << "Preprocessing input image " << i << " finished." << endl << endl;
 	}
@@ -105,7 +134,7 @@ CImg<unsigned char> stitching(vector<CImg<unsigned char>> &src_imgs) {
 			if (i == j)
 				continue;
 
-			vector<point_pair> pairs = getPointPairsFromFeature(features[i], features[j]);
+			vector<unified_point_pair> pairs = getUnifiedPointPairsFromFeature(features[i], features[j], algorithm);
 			if (pairs.size() >= 20) {
 				need_stitching[i][j] = true;
 
@@ -149,28 +178,28 @@ CImg<unsigned char> stitching(vector<CImg<unsigned char>> &src_imgs) {
 				unstitched_index.push(dst_index);
 			}
 
-			// Matching features using best-bin kd-tree.
-			vector<point_pair> src_to_dst_pairs = getPointPairsFromFeature(features[src_index], features[dst_index]);
-			vector<point_pair> dst_to_src_pairs = getPointPairsFromFeature(features[dst_index], features[src_index]);
+			// Matching features using best-bin kd-tree or ORB matcher.
+			vector<unified_point_pair> src_to_dst_pairs = getUnifiedPointPairsFromFeature(features[src_index], features[dst_index], algorithm);
+			vector<unified_point_pair> dst_to_src_pairs = getUnifiedPointPairsFromFeature(features[dst_index], features[src_index], algorithm);
 
 			if (src_to_dst_pairs.size() > dst_to_src_pairs.size()) {
 				dst_to_src_pairs.clear();
 				for (int i = 0; i < src_to_dst_pairs.size(); i++) {
-					point_pair temp(src_to_dst_pairs[i].b, src_to_dst_pairs[i].a);
+					unified_point_pair temp(src_to_dst_pairs[i].b, src_to_dst_pairs[i].a);
 					dst_to_src_pairs.push_back(temp);
 				}
 			}
 			else {
 				src_to_dst_pairs.clear();
 				for (int i = 0; i < dst_to_src_pairs.size(); i++) {
-					point_pair temp(dst_to_src_pairs[i].b, dst_to_src_pairs[i].a);
+					unified_point_pair temp(dst_to_src_pairs[i].b, dst_to_src_pairs[i].a);
 					src_to_dst_pairs.push_back(temp);
 				}
 			}
 
 			// Finding homography by RANSAC.
-			Parameters forward_H = RANSAC(dst_to_src_pairs);
-			Parameters backward_H = RANSAC(src_to_dst_pairs);
+			Parameters forward_H = RANSACUnified(dst_to_src_pairs);
+			Parameters backward_H = RANSACUnified(src_to_dst_pairs);
 
 			// Calculate the size of the image after stitching.
 			float min_x = getMinXAfterWarping(src_imgs[dst_index], forward_H);

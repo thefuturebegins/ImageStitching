@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include "CImg.h"
+#include "Feature.h"
 
 using namespace cimg_library;
 using namespace std;
@@ -25,6 +26,16 @@ struct point_pair {
 	VlSiftKeypoint a;
 	VlSiftKeypoint b;
 	point_pair(VlSiftKeypoint _a, VlSiftKeypoint _b) {
+		a = _a;
+		b = _b;
+	}
+};
+
+// Unified point pair structure for both SIFT and ORB
+struct unified_point_pair {
+	UnifiedKeypoint a;
+	UnifiedKeypoint b;
+	unified_point_pair(UnifiedKeypoint _a, UnifiedKeypoint _b) {
 		a = _a;
 		b = _b;
 	}
@@ -75,5 +86,11 @@ vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypo
 vector<point_pair> getPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio);
 Parameters getHomographyFromPoingPairs(const vector<point_pair> &pairs);
 Parameters RANSAC(const vector<point_pair> &pairs);
+
+// Unified matching functions for both SIFT and ORB
+vector<unified_point_pair> getUnifiedPointPairsFromFeature(const map<vector<float>, UnifiedKeypoint> &feature_a, const map<vector<float>, UnifiedKeypoint> &feature_b, FeatureAlgorithm algorithm);
+vector<unified_point_pair> getUnifiedPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, UnifiedKeypoint> &feature_a, const map<vector<float>, UnifiedKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio, FeatureAlgorithm algorithm);
+Parameters getHomographyFromUnifiedPointPairs(const vector<unified_point_pair> &pairs);
+Parameters RANSACUnified(const vector<unified_point_pair> &pairs);
 
 #endif
