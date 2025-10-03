@@ -15,7 +15,8 @@
     "totalImages": 8,
     "enableFeatureMatching": true,
     "enableFeatureVisualization": true,
-    "enableWarpingVisualization": true
+    "enableWarpingVisualization": false,
+    "enableMeshWarpingVisualization": true
   },
   "images": [
     {

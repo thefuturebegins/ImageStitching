@@ -146,6 +146,14 @@ private:
         const vector<map<vector<float>, VlSiftKeypoint>>& features
     );
 
+    // Create mesh warping visualization image showing blue 20x20 grid in overlap areas
+    static CImg<unsigned char> createMeshWarpingVisualization(
+        const vector<CImg<unsigned char>>& src_imgs,
+        const vector<ImageProfile>& image_profiles,
+        const vector<SeamLine>& seam_lines,
+        const vector<map<vector<float>, VlSiftKeypoint>>& features
+    );
+
 private:
     // Helper function to calculate distance from point to seam line
     static double distanceToSeamLine(int x, int y, const SeamLine& seam_line);

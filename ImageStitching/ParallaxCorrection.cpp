@@ -1287,3 +1287,457 @@ vector<WarpControlPoint> ParallaxCorrection::collectAllControlPoints(
     cout << "Collected " << all_control_points.size() << " total control points" << endl;
     return all_control_points;
 }
+
+// Create mesh warping visualization image showing blue 20x20 grid in overlap areas
+CImg<unsigned char> ParallaxCorrection::createMeshWarpingVisualization(
+    const vector<CImg<unsigned char>>& src_imgs,
+    const vector<ImageProfile>& image_profiles,
+    const vector<SeamLine>& seam_lines,
+    const vector<map<vector<float>, VlSiftKeypoint>>& features) {
+
+    if (src_imgs.empty()) {
+        return CImg<unsigned char>();
+    }
+
+    int img_width = src_imgs[0].width();
+    int img_height = src_imgs[0].height();
+
+    // Create ultra-wide resolution image: 30720x2160 with 8 images + separators
+    int target_width = 30720; // Ultra-wide width
+    int target_height = 2160; // 4K height
+    int separator_width = 5;  // 5 pixel wide vertical separators
+    int image_width = (target_width - (separator_width * 7)) / 8; // 7 separators between 8 images
+    int image_height = target_height;
+
+    CImg<unsigned char> visualization(target_width, target_height, 1, 3, 0);
+
+    // Sort images by radial angle to ensure correct left-to-right order
+    vector<pair<double, int>> angle_index_pairs;
+    for (int i = 0; i < image_profiles.size(); i++) {
+        angle_index_pairs.push_back(make_pair(image_profiles[i].radialAngle, i));
+    }
+    sort(angle_index_pairs.begin(), angle_index_pairs.end());
+
+    // Copy all images into the composite in correct order
+    for (int i = 0; i < angle_index_pairs.size(); i++) {
+        int img_index = angle_index_pairs[i].second;
+        int start_x = i * (image_width + separator_width);
+
+        // Resize and copy image
+        CImg<unsigned char> resized_img = src_imgs[img_index];
+        resized_img.resize(image_width, image_height);
+        for (int y = 0; y < image_height; y++) {
+            for (int x = 0; x < image_width; x++) {
+                for (int c = 0; c < 3; c++) {
+                    visualization(start_x + x, y, 0, c) = resized_img(x, y, 0, c);
+                }
+            }
+        }
+
+        // Draw vertical separator line (except after last image)
+        if (i < angle_index_pairs.size() - 1) {
+            for (int y = 0; y < image_height; y++) {
+                for (int sep = 0; sep < separator_width; sep++) {
+                    int sep_x = start_x + image_width + sep;
+                    visualization(sep_x, y, 0, 0) = 255; // White separator
+                    visualization(sep_x, y, 0, 1) = 255;
+                    visualization(sep_x, y, 0, 2) = 255;
+                }
+            }
+        }
+    }
+
+    // Create a map from image index to position in the sorted order
+    map<int, int> img_index_to_position;
+    for (int i = 0; i < angle_index_pairs.size(); i++) {
+        img_index_to_position[angle_index_pairs[i].second] = i;
+    }
+
+    cout << "Creating mesh warping visualization for " << seam_lines.size() << " seam lines..." << endl;
+
+    // Calculate overlap ratio for determining overlap areas
+    double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+    int overlap_width = (int)(img_width * overlap_ratio);
+
+    // Process each seam line to draw blue 20x20 grid in overlap areas
+    for (const auto& seam : seam_lines) {
+        cout << "Processing seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
+
+        int img1_index = seam.image1_index;
+        int img2_index = seam.image2_index;
+
+        // Find positions in the sorted order
+        if (img_index_to_position.find(img1_index) == img_index_to_position.end() ||
+            img_index_to_position.find(img2_index) == img_index_to_position.end()) {
+            continue;
+        }
+
+        int pos1 = img_index_to_position[img1_index];
+        int pos2 = img_index_to_position[img2_index];
+        int start_x1 = pos1 * (image_width + separator_width);
+        int start_x2 = pos2 * (image_width + separator_width);
+
+        // Calculate overlap regions for both images
+        // Image 1 overlap region: right edge (where it meets the next image)
+        int img1_overlap_start = img_width - overlap_width;
+        int img1_overlap_end = img_width;
+
+        // Image 2 overlap region: left edge (where it meets the previous image)
+        int img2_overlap_start = 0;
+        int img2_overlap_end = overlap_width;
+
+        // Draw blue 20x20 grid with connected spots in image 1's overlap region
+        int grid_rows = 20; // 20 rows
+        int grid_cols = 20; // 20 columns
+        int overlap_width_pixels = img1_overlap_end - img1_overlap_start;
+        int x_step = overlap_width_pixels / (grid_cols - 1); // Step size for x
+        int y_step = img_height / (grid_rows - 1); // Step size for y
+        
+        // First, draw all the grid intersection points
+        for (int row = 0; row < grid_rows; row++) {
+            for (int col = 0; col < grid_cols; col++) {
+                int x = img1_overlap_start + col * x_step;
+                int y = row * y_step;
+                
+                // Ensure we stay within bounds
+                if (x >= img1_overlap_start && x < img1_overlap_end && y >= 0 && y < img_height) {
+                    // Calculate position in visualization
+                    int global_x = start_x1 + (x * image_width) / img_width;
+                    int global_y = (y * image_height) / img_height;
+                    
+                    // Draw a small blue spot (3x3 pixels)
+                    int spot_size = 3;
+                    for (int dy = -spot_size/2; dy <= spot_size/2; dy++) {
+                        for (int dx = -spot_size/2; dx <= spot_size/2; dx++) {
+                            int viz_x = global_x + dx;
+                            int viz_y = global_y + dy;
+                            if (viz_x >= start_x1 && viz_x < start_x1 + image_width && 
+                                viz_y >= 0 && viz_y < target_height) {
+                                visualization(viz_x, viz_y, 0, 0) = 0;   // No red
+                                visualization(viz_x, viz_y, 0, 1) = 0;   // No green
+                                visualization(viz_x, viz_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Now draw the connecting lines to form the grid
+        // Draw horizontal lines
+        for (int row = 0; row < grid_rows; row++) {
+            int y = row * y_step;
+            if (y >= 0 && y < img_height) {
+                int global_y = (y * image_height) / img_height;
+                for (int col = 0; col < grid_cols - 1; col++) {
+                    int x1 = img1_overlap_start + col * x_step;
+                    int x2 = img1_overlap_start + (col + 1) * x_step;
+                    
+                    if (x1 >= img1_overlap_start && x1 < img1_overlap_end && 
+                        x2 >= img1_overlap_start && x2 < img1_overlap_end) {
+                        
+                        int global_x1 = start_x1 + (x1 * image_width) / img_width;
+                        int global_x2 = start_x1 + (x2 * image_width) / img_width;
+                        
+                        // Draw line from global_x1 to global_x2 at global_y
+                        int steps = abs(global_x2 - global_x1);
+                        for (int i = 0; i <= steps; i++) {
+                            int line_x = global_x1 + (global_x2 - global_x1) * i / steps;
+                            if (line_x >= start_x1 && line_x < start_x1 + image_width && 
+                                global_y >= 0 && global_y < target_height) {
+                                visualization(line_x, global_y, 0, 0) = 0;   // No red
+                                visualization(line_x, global_y, 0, 1) = 0;   // No green
+                                visualization(line_x, global_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Draw vertical lines
+        for (int col = 0; col < grid_cols; col++) {
+            int x = img1_overlap_start + col * x_step;
+            if (x >= img1_overlap_start && x < img1_overlap_end) {
+                int global_x = start_x1 + (x * image_width) / img_width;
+                for (int row = 0; row < grid_rows - 1; row++) {
+                    int y1 = row * y_step;
+                    int y2 = (row + 1) * y_step;
+                    
+                    if (y1 >= 0 && y1 < img_height && y2 >= 0 && y2 < img_height) {
+                        int global_y1 = (y1 * image_height) / img_height;
+                        int global_y2 = (y2 * image_height) / img_height;
+                        
+                        // Draw line from global_y1 to global_y2 at global_x
+                        int steps = abs(global_y2 - global_y1);
+                        for (int i = 0; i <= steps; i++) {
+                            int line_y = global_y1 + (global_y2 - global_y1) * i / steps;
+                            if (global_x >= start_x1 && global_x < start_x1 + image_width && 
+                                line_y >= 0 && line_y < target_height) {
+                                visualization(global_x, line_y, 0, 0) = 0;   // No red
+                                visualization(global_x, line_y, 0, 1) = 0;   // No green
+                                visualization(global_x, line_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw blue 20x20 grid with connected spots in image 2's overlap region
+        int overlap_width_pixels2 = img2_overlap_end - img2_overlap_start;
+        int x_step2 = overlap_width_pixels2 / (grid_cols - 1); // Step size for x
+        
+        // First, draw all the grid intersection points
+        for (int row = 0; row < grid_rows; row++) {
+            for (int col = 0; col < grid_cols; col++) {
+                int x = img2_overlap_start + col * x_step2;
+                int y = row * y_step;
+                
+                // Ensure we stay within bounds
+                if (x >= img2_overlap_start && x < img2_overlap_end && y >= 0 && y < img_height) {
+                    // Calculate position in visualization
+                    int global_x = start_x2 + (x * image_width) / img_width;
+                    int global_y = (y * image_height) / img_height;
+                    
+                    // Draw a small blue spot (3x3 pixels)
+                    int spot_size = 3;
+                    for (int dy = -spot_size/2; dy <= spot_size/2; dy++) {
+                        for (int dx = -spot_size/2; dx <= spot_size/2; dx++) {
+                            int viz_x = global_x + dx;
+                            int viz_y = global_y + dy;
+                            if (viz_x >= start_x2 && viz_x < start_x2 + image_width && 
+                                viz_y >= 0 && viz_y < target_height) {
+                                visualization(viz_x, viz_y, 0, 0) = 0;   // No red
+                                visualization(viz_x, viz_y, 0, 1) = 0;   // No green
+                                visualization(viz_x, viz_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Now draw the connecting lines to form the grid
+        // Draw horizontal lines
+        for (int row = 0; row < grid_rows; row++) {
+            int y = row * y_step;
+            if (y >= 0 && y < img_height) {
+                int global_y = (y * image_height) / img_height;
+                for (int col = 0; col < grid_cols - 1; col++) {
+                    int x1 = img2_overlap_start + col * x_step2;
+                    int x2 = img2_overlap_start + (col + 1) * x_step2;
+                    
+                    if (x1 >= img2_overlap_start && x1 < img2_overlap_end && 
+                        x2 >= img2_overlap_start && x2 < img2_overlap_end) {
+                        
+                        int global_x1 = start_x2 + (x1 * image_width) / img_width;
+                        int global_x2 = start_x2 + (x2 * image_width) / img_width;
+                        
+                        // Draw line from global_x1 to global_x2 at global_y
+                        int steps = abs(global_x2 - global_x1);
+                        for (int i = 0; i <= steps; i++) {
+                            int line_x = global_x1 + (global_x2 - global_x1) * i / steps;
+                            if (line_x >= start_x2 && line_x < start_x2 + image_width && 
+                                global_y >= 0 && global_y < target_height) {
+                                visualization(line_x, global_y, 0, 0) = 0;   // No red
+                                visualization(line_x, global_y, 0, 1) = 0;   // No green
+                                visualization(line_x, global_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Draw vertical lines
+        for (int col = 0; col < grid_cols; col++) {
+            int x = img2_overlap_start + col * x_step2;
+            if (x >= img2_overlap_start && x < img2_overlap_end) {
+                int global_x = start_x2 + (x * image_width) / img_width;
+                for (int row = 0; row < grid_rows - 1; row++) {
+                    int y1 = row * y_step;
+                    int y2 = (row + 1) * y_step;
+                    
+                    if (y1 >= 0 && y1 < img_height && y2 >= 0 && y2 < img_height) {
+                        int global_y1 = (y1 * image_height) / img_height;
+                        int global_y2 = (y2 * image_height) / img_height;
+                        
+                        // Draw line from global_y1 to global_y2 at global_x
+                        int steps = abs(global_y2 - global_y1);
+                        for (int i = 0; i <= steps; i++) {
+                            int line_y = global_y1 + (global_y2 - global_y1) * i / steps;
+                            if (global_x >= start_x2 && global_x < start_x2 + image_width && 
+                                line_y >= 0 && line_y < target_height) {
+                                visualization(global_x, line_y, 0, 0) = 0;   // No red
+                                visualization(global_x, line_y, 0, 1) = 0;   // No green
+                                visualization(global_x, line_y, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        cout << "Drew blue 20x20 connected grid in overlap regions for images " << img1_index << " and " << img2_index << endl;
+        cout << "Image " << img1_index << " overlap region: [" << img1_overlap_start << "-" << img1_overlap_end << "]" << endl;
+        cout << "Image " << img2_index << " overlap region: [" << img2_overlap_start << "-" << img2_overlap_end << "]" << endl;
+    }
+
+    // Now add feature matching control points visualization (similar to createFeatureVisualization)
+    cout << "Adding feature matching control points visualization..." << endl;
+
+    // Draw features near seams with colored bounding boxes
+    for (const auto& seam : seam_lines) {
+        cout << "Visualizing features for seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
+
+        // First, get ALL feature pairs between these images with distance constraint
+        double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
+        vector<point_pair> all_features = getPointPairsFromFeatureWithDistanceConstraint(
+            features[seam.image1_index],
+            features[seam.image2_index],
+            src_imgs[seam.image1_index].width(),
+            src_imgs[seam.image1_index].height(),
+            overlap_ratio
+        );
+        cout << "Total feature pairs between images " << seam.image1_index << " and " << seam.image2_index << ": " << all_features.size() << endl;
+
+        // Also get features in overlap region for comparison
+        vector<point_pair> seam_features = findSeamFeaturesInOverlap(
+            src_imgs[seam.image1_index],
+            src_imgs[seam.image2_index],
+            features[seam.image1_index],
+            features[seam.image2_index],
+            seam
+        );
+
+        cout << "Features in overlap region: " << seam_features.size() << endl;
+
+        // Debug: Show positions of first few matched features
+        cout << "First few matched feature positions:" << endl;
+        int count = 0;
+        for (const auto& pair : all_features) {
+            if (count >= 5) break; // Show only first 5
+            int x1 = (int)pair.a.x;
+            int y1 = (int)pair.a.y;
+            int x2 = (int)pair.b.x;
+            int y2 = (int)pair.b.y;
+            cout << "  Feature " << count << ": img1(" << x1 << "," << y1 << ") -> img2(" << x2 << "," << y2 << ")" << endl;
+            count++;
+        }
+
+        // Visualize ALL features first (with smaller, less prominent markers)
+        for (const auto& pair : all_features) {
+            int x1 = (int)pair.a.x;
+            int y1 = (int)pair.a.y;
+            int x2 = (int)pair.b.x;
+            int y2 = (int)pair.b.y;
+
+            // Find positions in the sorted order
+            int pos1 = img_index_to_position[seam.image1_index];
+            int pos2 = img_index_to_position[seam.image2_index];
+
+            // Calculate coordinates in the new layout
+            int global_x1 = pos1 * (image_width + separator_width) + (x1 * image_width) / img_width;
+            int global_x2 = pos2 * (image_width + separator_width) + (x2 * image_width) / img_width;
+            int global_y1 = (y1 * image_height) / img_height;
+            int global_y2 = (y2 * image_height) / img_height;
+
+            // Draw small dots for all features (cyan)
+            int dot_size = 8;
+            for (int dy = -dot_size/2; dy <= dot_size/2; dy++) {
+                for (int dx = -dot_size/2; dx <= dot_size/2; dx++) {
+                    int px1 = global_x1 + dx;
+                    int py1 = global_y1 + dy;
+                    int px2 = global_x2 + dx;
+                    int py2 = global_y2 + dy;
+
+                    if (px1 >= 0 && px1 < target_width && py1 >= 0 && py1 < target_height) {
+                        visualization(px1, py1, 0, 0) = 0;   // No red
+                        visualization(px1, py1, 0, 1) = 255; // Full green
+                        visualization(px1, py1, 0, 2) = 255; // Full blue (cyan)
+                    }
+                    if (px2 >= 0 && px2 < target_width && py2 >= 0 && py2 < target_height) {
+                        visualization(px2, py2, 0, 0) = 0;   // No red
+                        visualization(px2, py2, 0, 1) = 255; // Full green
+                        visualization(px2, py2, 0, 2) = 255; // Full blue (cyan)
+                    }
+                }
+            }
+
+            // Also draw lines connecting matched features (magenta)
+            if (all_features.size() <= 50) { // Only draw lines if not too many features
+                // Simple line drawing between matched features
+                int steps = max(abs(global_x2 - global_x1), abs(global_y2 - global_y1));
+                for (int i = 0; i <= steps; i++) {
+                    int px = global_x1 + (global_x2 - global_x1) * i / steps;
+                    int py = global_y1 + (global_y2 - global_y1) * i / steps;
+                    if (px >= 0 && px < target_width && py >= 0 && py < target_height) {
+                        visualization(px, py, 0, 0) = 255; // Full red
+                        visualization(px, py, 0, 1) = 0;   // No green
+                        visualization(px, py, 0, 2) = 255; // Full blue (magenta)
+                    }
+                }
+            }
+        }
+
+        // Now highlight features in overlap region with larger, colored boxes
+        for (const auto& pair : seam_features) {
+            int x1 = (int)pair.a.x;
+            int y1 = (int)pair.a.y;
+            int x2 = (int)pair.b.x;
+            int y2 = (int)pair.b.y;
+
+            // Find positions in the sorted order
+            int pos1 = img_index_to_position[seam.image1_index];
+            int pos2 = img_index_to_position[seam.image2_index];
+
+            // Calculate coordinates in the new layout
+            int global_x1 = pos1 * (image_width + separator_width) + (x1 * image_width) / img_width;
+            int global_x2 = pos2 * (image_width + separator_width) + (x2 * image_width) / img_width;
+            int global_y1 = (y1 * image_height) / img_height;
+            int global_y2 = (y2 * image_height) / img_height;
+
+            cout << "Overlap feature pair: (" << x1 << "," << y1 << ") -> (" << x2 << "," << y2 << ")" << endl;
+            cout << "Global coords: (" << global_x1 << "," << global_y1 << ") -> (" << global_x2 << "," << global_y2 << ")" << endl;
+
+            // Draw bounding box for feature in first image (red)
+            int box_size = 30; // Larger boxes for overlap features
+            for (int dy = -box_size/2; dy <= box_size/2; dy++) {
+                for (int dx = -box_size/2; dx <= box_size/2; dx++) {
+                    int px = global_x1 + dx;
+                    int py = global_y1 + dy;
+                    if (px >= 0 && px < target_width && py >= 0 && py < target_height) {
+                        // Red border (thick and bright)
+                        if (abs(dx) >= box_size/2 - 2 || abs(dy) >= box_size/2 - 2) {
+                            visualization(px, py, 0, 0) = 255; // Full red
+                            visualization(px, py, 0, 1) = 0;   // No green
+                            visualization(px, py, 0, 2) = 0;   // No blue
+                        }
+                    }
+                }
+            }
+
+            // Draw bounding box for feature in second image (yellow)
+            for (int dy = -box_size/2; dy <= box_size/2; dy++) {
+                for (int dx = -box_size/2; dx <= box_size/2; dx++) {
+                    int px = global_x2 + dx;
+                    int py = global_y2 + dy;
+                    if (px >= 0 && px < target_width && py >= 0 && py < target_height) {
+                        // Yellow border (thick and bright)
+                        if (abs(dx) >= box_size/2 - 2 || abs(dy) >= box_size/2 - 2) {
+                            visualization(px, py, 0, 0) = 255; // Full red
+                            visualization(px, py, 0, 1) = 255; // Full green
+                            visualization(px, py, 0, 2) = 0;   // No blue
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    cout << "Mesh warping visualization created with dimensions " << target_width << "x" << target_height << endl;
+    cout << "Blue 20x20 connected grid (400 intersection points with connecting lines) drawn only in overlap areas between adjacent images" << endl;
+    cout << "Feature points: Cyan dots for all features, Magenta lines for connections, Red/Yellow boxes for overlap features" << endl;
+    return visualization;
+}
