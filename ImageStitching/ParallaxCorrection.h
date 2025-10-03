@@ -99,6 +99,15 @@ private:
         int image_height
     );
 
+    // Calculate bilateral parallax displacement (both images move halfway toward each other)
+    static vector<WarpControlPoint> calculateBilateralParallaxDisplacement(
+        const vector<point_pair>& seam_features,
+        const SeamLine& seam_line,
+        int image_width,
+        int image_height,
+        bool is_image1
+    );
+
     // Apply local warping to correct parallax
     static CImg<unsigned char> applyLocalWarping(
         const CImg<unsigned char>& image,
@@ -123,6 +132,14 @@ private:
 
     // Create feature visualization image
     static CImg<unsigned char> createFeatureVisualization(
+        const vector<CImg<unsigned char>>& src_imgs,
+        const vector<ImageProfile>& image_profiles,
+        const vector<SeamLine>& seam_lines,
+        const vector<map<vector<float>, VlSiftKeypoint>>& features
+    );
+
+    // Create warping visualization image showing displacement areas
+    static CImg<unsigned char> createWarpingVisualization(
         const vector<CImg<unsigned char>>& src_imgs,
         const vector<ImageProfile>& image_profiles,
         const vector<SeamLine>& seam_lines,

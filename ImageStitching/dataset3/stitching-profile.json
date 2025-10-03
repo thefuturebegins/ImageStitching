@@ -14,7 +14,8 @@
     "hFOV": 64.04,
     "totalImages": 8,
     "enableFeatureMatching": true,
-    "enableFeatureVisualization": true
+    "enableFeatureVisualization": true,
+    "enableWarpingVisualization": true
   },
   "images": [
     {

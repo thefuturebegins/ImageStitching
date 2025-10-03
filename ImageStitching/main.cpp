@@ -37,6 +37,7 @@ struct StitchingProfile {
     double angularSpacing;
     bool enableFeatureMatching;
     bool enableFeatureVisualization;
+    bool enableWarpingVisualization;
     vector<ImageProfile> images;
 };
 
@@ -226,6 +227,7 @@ public:
         // Set default values
         profile.enableFeatureMatching = true;
         profile.enableFeatureVisualization = true;
+        profile.enableWarpingVisualization = true;
 
         // Simple direct parsing using string search
         // Parse mode
@@ -331,6 +333,19 @@ public:
             }
         }
 
+        // Parse enableWarpingVisualization
+        size_t warpingVizPos = json.find("\"enableWarpingVisualization\":");
+        if (warpingVizPos != string::npos) {
+            warpingVizPos = json.find(":", warpingVizPos);
+            if (warpingVizPos != string::npos) {
+                warpingVizPos = json.find_first_not_of(" \t\n\r", warpingVizPos + 1);
+                if (warpingVizPos != string::npos) {
+                    string valueStr = json.substr(warpingVizPos, 4); // "true" or "false"
+                    profile.enableWarpingVisualization = (valueStr == "true");
+                }
+            }
+        }
+
         // Parse images array
         profile.images = parseImages(json);
 
@@ -339,7 +354,8 @@ public:
              << "', HFOV: " << profile.hFOV << ", AngularSpacing: " << profile.angularSpacing
              << ", TotalImages: " << profile.totalImages << ", Images count: " << profile.images.size()
              << ", FeatureMatching: " << (profile.enableFeatureMatching ? "enabled" : "disabled")
-             << ", FeatureVisualization: " << (profile.enableFeatureVisualization ? "enabled" : "disabled") << endl;
+             << ", FeatureVisualization: " << (profile.enableFeatureVisualization ? "enabled" : "disabled")
+             << ", WarpingVisualization: " << (profile.enableWarpingVisualization ? "enabled" : "disabled") << endl;
 
         for (int i = 0; i < profile.images.size() && i < 3; i++) {
             cout << "  Image " << i << ": " << profile.images[i].fileName
@@ -535,6 +551,22 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
         corrected_imgs = ParallaxCorrection::correctParallaxWithProfile(
             src_imgs, images, features_for_parallax
         );
+
+        if (profile.enableWarpingVisualization) {
+            cout << "Creating warping visualization..." << endl;
+            CImg<unsigned char> warping_viz = ParallaxCorrection::createWarpingVisualization(
+                src_imgs, images, seam_lines, features_for_parallax
+            );
+
+            // Save warping visualization
+            if (!warping_viz.is_empty()) {
+                warping_viz.save("ImageStitching/res/pano3_warping_visualization.jpg");
+                cout << "Warping visualization saved to pano3_warping_visualization.jpg" << endl;
+            }
+
+        } else {
+            cout << "Warping visualization disabled, skipping..." << endl;
+        }
 
         // Create feature visualization if enabled
         if (profile.enableFeatureVisualization) {

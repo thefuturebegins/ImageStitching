@@ -32,7 +32,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 761
+          "totalFeatures": 760
         },
         "blendRegions": {
           "leftBlend": {
@@ -164,7 +164,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 974
+          "totalFeatures": 972
         },
         "blendRegions": {
           "leftBlend": {
@@ -197,7 +197,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 1008
+          "totalFeatures": 1009
         },
         "blendRegions": {
           "leftBlend": {
@@ -230,7 +230,7 @@
         "featureCounts": {
           "leftSeamFeatures": 0,
           "rightSeamFeatures": 0,
-          "totalFeatures": 907
+          "totalFeatures": 910
         },
         "blendRegions": {
           "leftBlend": {
@@ -426,7 +426,7 @@
       }
     ],
     "summaryStatistics": {
-      "totalFeatures": 7273,
+      "totalFeatures": 7274,
       "averageFeaturesPerImage": 909,
       "totalSeamFeatures": 0,
       "averageSeamFeatures": 0

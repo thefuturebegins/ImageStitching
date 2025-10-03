@@ -276,6 +276,70 @@ vector<WarpControlPoint> ParallaxCorrection::calculateParallaxDisplacement(
     return control_points;
 }
 
+// Calculate bilateral parallax displacement (both images move halfway toward each other)
+vector<WarpControlPoint> ParallaxCorrection::calculateBilateralParallaxDisplacement(
+    const vector<point_pair>& seam_features,
+    const SeamLine& seam_line,
+    int image_width,
+    int image_height,
+    bool is_image1) {
+
+    vector<WarpControlPoint> control_points;
+    
+    cout << "Calculating bilateral parallax displacement for " << seam_features.size() << " features" << endl;
+
+    // Create a control point for EVERY single feature match
+    for (const auto& pair : seam_features) {
+        int x1 = (int)pair.a.x;
+        int y1 = (int)pair.a.y;
+        int x2 = (int)pair.b.x;
+        int y2 = (int)pair.b.y;
+
+        // Calculate displacement (difference between matched points)
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+
+        // If the displacement is very large in x-direction, it's due to circular arrangement
+        if (abs(dx) > image_width * 0.3) {
+            // This is a circular wrap-around - scale down the x-displacement significantly
+            dx = dx * 0.01; // Scale down x-displacement by 100x
+        }
+
+        // Only consider reasonable displacements
+        if (abs(dx) < image_width * MAX_DISPLACEMENT_RATIO &&
+            abs(dy) < image_height * MAX_DISPLACEMENT_RATIO) {
+
+            // Create control point for bilateral correction
+            WarpControlPoint cp;
+            
+            if (is_image1) {
+                // For image 1: move halfway toward image 2
+                cp.x = x1;
+                cp.y = y1;
+                cp.target_x = x1 + (int)(dx * 0.5);  // Move halfway
+                cp.target_y = y1 + (int)(dy * 0.5);
+            } else {
+                // For image 2: move halfway toward image 1
+                cp.x = x2;
+                cp.y = y2;
+                cp.target_x = x2 - (int)(dx * 0.5);  // Move halfway in opposite direction
+                cp.target_y = y2 - (int)(dy * 0.5);
+            }
+            
+            cp.weight = 1.0;  // Full weight for individual features
+
+            control_points.push_back(cp);
+
+            cout << "Bilateral control point at (" << cp.x << "," << cp.y << ") -> ("
+                 << cp.target_x << "," << cp.target_y << ") weight=" << cp.weight
+                 << " displacement=(" << (cp.target_x - cp.x) << "," << (cp.target_y - cp.y) << ")" << endl;
+        }
+    }
+
+    cout << "Created " << control_points.size() << " bilateral control points for local warping" << endl;
+    return control_points;
+}
+
 // Apply local warping to correct parallax
 CImg<unsigned char> ParallaxCorrection::applyLocalWarping(
     const CImg<unsigned char>& image,
@@ -867,6 +931,254 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
     }
 
     cout << "Feature visualization created with dimensions " << target_width << "x" << target_height << endl;
+    return visualization;
+}
+
+// Create warping visualization image showing displacement areas
+CImg<unsigned char> ParallaxCorrection::createWarpingVisualization(
+    const vector<CImg<unsigned char>>& src_imgs,
+    const vector<ImageProfile>& image_profiles,
+    const vector<SeamLine>& seam_lines,
+    const vector<map<vector<float>, VlSiftKeypoint>>& features) {
+
+    if (src_imgs.empty()) {
+        return CImg<unsigned char>();
+    }
+
+    int img_width = src_imgs[0].width();
+    int img_height = src_imgs[0].height();
+
+    // Create ultra-wide resolution image: 30720x2160 with 8 images + separators
+    int target_width = 30720; // Ultra-wide width
+    int target_height = 2160; // 4K height
+    int separator_width = 5;  // 5 pixel wide vertical separators
+    int image_width = (target_width - (separator_width * 7)) / 8; // 7 separators between 8 images
+    int image_height = target_height;
+
+    CImg<unsigned char> visualization(target_width, target_height, 1, 3, 0);
+
+    // Sort images by radial angle to ensure correct left-to-right order
+    vector<pair<double, int>> angle_index_pairs;
+    for (int i = 0; i < image_profiles.size(); i++) {
+        angle_index_pairs.push_back(make_pair(image_profiles[i].radialAngle, i));
+    }
+    sort(angle_index_pairs.begin(), angle_index_pairs.end());
+
+    // Copy all images into the composite in correct order (with reduced opacity for overlay effect)
+    for (int i = 0; i < angle_index_pairs.size(); i++) {
+        int img_index = angle_index_pairs[i].second;
+        int start_x = i * (image_width + separator_width);
+
+        // Resize and copy image with reduced opacity
+        CImg<unsigned char> resized_img = src_imgs[img_index];
+        resized_img.resize(image_width, image_height);
+        for (int y = 0; y < image_height; y++) {
+            for (int x = 0; x < image_width; x++) {
+                for (int c = 0; c < 3; c++) {
+                    // Reduce opacity to 50% for overlay effect
+                    visualization(start_x + x, y, 0, c) = resized_img(x, y, 0, c) * 0.5;
+                }
+            }
+        }
+
+        // Draw vertical separator line (except after last image)
+        if (i < angle_index_pairs.size() - 1) {
+            for (int y = 0; y < image_height; y++) {
+                for (int sep = 0; sep < separator_width; sep++) {
+                    int sep_x = start_x + image_width + sep;
+                    visualization(sep_x, y, 0, 0) = 255; // White separator
+                    visualization(sep_x, y, 0, 1) = 255;
+                    visualization(sep_x, y, 0, 2) = 255;
+                }
+            }
+        }
+    }
+
+    // Create a map from image index to position in the sorted order
+    map<int, int> img_index_to_position;
+    for (int i = 0; i < angle_index_pairs.size(); i++) {
+        img_index_to_position[angle_index_pairs[i].second] = i;
+    }
+
+    cout << "Creating warping visualization for " << seam_lines.size() << " seam lines..." << endl;
+
+    // Process each seam line to show displacement areas
+    for (const auto& seam : seam_lines) {
+        cout << "Processing seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
+
+        // Get features near this seam for parallax correction
+        vector<point_pair> seam_features = findSeamFeaturesInOverlap(
+            src_imgs[seam.image1_index],
+            src_imgs[seam.image2_index],
+            features[seam.image1_index],
+            features[seam.image2_index],
+            seam
+        );
+
+        if (seam_features.empty()) {
+            cout << "No features found for seam between images " << seam.image1_index << " and " << seam.image2_index << endl;
+            continue;
+        }
+
+        // Calculate control points for bilateral correction (both images move halfway)
+        vector<WarpControlPoint> control_points1 = calculateBilateralParallaxDisplacement(
+            seam_features, seam, img_width, img_height, true  // true for image 1
+        );
+
+        vector<WarpControlPoint> control_points2 = calculateBilateralParallaxDisplacement(
+            seam_features, seam, img_width, img_height, false // false for image 2
+        );
+
+        cout << "Generated " << control_points1.size() << " control points for image " << seam.image1_index << endl;
+        cout << "Generated " << control_points2.size() << " control points for image " << seam.image2_index << endl;
+
+        // Visualize control points and displacement areas for image 1
+        if (!control_points1.empty()) {
+            int pos1 = img_index_to_position[seam.image1_index];
+            int start_x1 = pos1 * (image_width + separator_width);
+
+            for (const auto& cp : control_points1) {
+                // Calculate position in visualization
+                int global_x = start_x1 + (cp.x * image_width) / img_width;
+                int global_y = (cp.y * image_height) / img_height;
+
+                // Draw original displacement circle outline in BLUE
+                int radius = WARP_REGION_RADIUS * image_width / img_width; // Scale radius
+                int outline_thickness = 3; // Thickness of the circle outline
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int dist_squared = dx*dx + dy*dy;
+                        // Draw outline: pixels within radius but outside (radius - thickness)
+                        if (dist_squared <= radius*radius && dist_squared >= (radius - outline_thickness)*(radius - outline_thickness)) {
+                            int px = global_x + dx;
+                            int py = global_y + dy;
+                            if (px >= start_x1 && px < start_x1 + image_width && 
+                                py >= 0 && py < target_height) {
+                                // Blue circle outline for original displacement area
+                                visualization(px, py, 0, 0) = 0;   // No red
+                                visualization(px, py, 0, 1) = 0;   // No green
+                                visualization(px, py, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+
+                // Draw target displacement area outline in RED
+                int target_global_x = start_x1 + (cp.target_x * image_width) / img_width;
+                int target_global_y = (cp.target_y * image_height) / img_height;
+
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int dist_squared = dx*dx + dy*dy;
+                        // Draw outline: pixels within radius but outside (radius - thickness)
+                        if (dist_squared <= radius*radius && dist_squared >= (radius - outline_thickness)*(radius - outline_thickness)) {
+                            int px = target_global_x + dx;
+                            int py = target_global_y + dy;
+                            if (px >= start_x1 && px < start_x1 + image_width && 
+                                py >= 0 && py < target_height) {
+                                // Red circle outline for new displacement area
+                                visualization(px, py, 0, 0) = 255; // Full red
+                                visualization(px, py, 0, 1) = 0;   // No green
+                                visualization(px, py, 0, 2) = 0;   // No blue
+                            }
+                        }
+                    }
+                }
+
+                // Draw arrow from original to target position
+                int steps = max(abs(target_global_x - global_x), abs(target_global_y - global_y));
+                if (steps > 0) {
+                    for (int i = 0; i <= steps; i++) {
+                        int arrow_x = global_x + (target_global_x - global_x) * i / steps;
+                        int arrow_y = global_y + (target_global_y - global_y) * i / steps;
+                        if (arrow_x >= start_x1 && arrow_x < start_x1 + image_width && 
+                            arrow_y >= 0 && arrow_y < target_height) {
+                            // Yellow arrow
+                            visualization(arrow_x, arrow_y, 0, 0) = 255; // Full red
+                            visualization(arrow_x, arrow_y, 0, 1) = 255; // Full green
+                            visualization(arrow_x, arrow_y, 0, 2) = 0;   // No blue
+                        }
+                    }
+                }
+            }
+        }
+
+        // Visualize control points and displacement areas for image 2
+        if (!control_points2.empty()) {
+            int pos2 = img_index_to_position[seam.image2_index];
+            int start_x2 = pos2 * (image_width + separator_width);
+
+            for (const auto& cp : control_points2) {
+                // Calculate position in visualization
+                int global_x = start_x2 + (cp.x * image_width) / img_width;
+                int global_y = (cp.y * image_height) / img_height;
+
+                // Draw original displacement circle outline in BLUE
+                int radius = WARP_REGION_RADIUS * image_width / img_width; // Scale radius
+                int outline_thickness = 3; // Thickness of the circle outline
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int dist_squared = dx*dx + dy*dy;
+                        // Draw outline: pixels within radius but outside (radius - thickness)
+                        if (dist_squared <= radius*radius && dist_squared >= (radius - outline_thickness)*(radius - outline_thickness)) {
+                            int px = global_x + dx;
+                            int py = global_y + dy;
+                            if (px >= start_x2 && px < start_x2 + image_width && 
+                                py >= 0 && py < target_height) {
+                                // Blue circle outline for original displacement area
+                                visualization(px, py, 0, 0) = 0;   // No red
+                                visualization(px, py, 0, 1) = 0;   // No green
+                                visualization(px, py, 0, 2) = 255; // Full blue
+                            }
+                        }
+                    }
+                }
+
+                // Draw target displacement area outline in RED
+                int target_global_x = start_x2 + (cp.target_x * image_width) / img_width;
+                int target_global_y = (cp.target_y * image_height) / img_height;
+
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int dist_squared = dx*dx + dy*dy;
+                        // Draw outline: pixels within radius but outside (radius - thickness)
+                        if (dist_squared <= radius*radius && dist_squared >= (radius - outline_thickness)*(radius - outline_thickness)) {
+                            int px = target_global_x + dx;
+                            int py = target_global_y + dy;
+                            if (px >= start_x2 && px < start_x2 + image_width && 
+                                py >= 0 && py < target_height) {
+                                // Red circle outline for new displacement area
+                                visualization(px, py, 0, 0) = 255; // Full red
+                                visualization(px, py, 0, 1) = 0;   // No green
+                                visualization(px, py, 0, 2) = 0;   // No blue
+                            }
+                        }
+                    }
+                }
+
+                // Draw arrow from original to target position
+                int steps = max(abs(target_global_x - global_x), abs(target_global_y - global_y));
+                if (steps > 0) {
+                    for (int i = 0; i <= steps; i++) {
+                        int arrow_x = global_x + (target_global_x - global_x) * i / steps;
+                        int arrow_y = global_y + (target_global_y - global_y) * i / steps;
+                        if (arrow_x >= start_x2 && arrow_x < start_x2 + image_width && 
+                            arrow_y >= 0 && arrow_y < target_height) {
+                            // Yellow arrow
+                            visualization(arrow_x, arrow_y, 0, 0) = 255; // Full red
+                            visualization(arrow_x, arrow_y, 0, 1) = 255; // Full green
+                            visualization(arrow_x, arrow_y, 0, 2) = 0;   // No blue
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    cout << "Bilateral warping visualization created with dimensions " << target_width << "x" << target_height << endl;
+    cout << "Blue circle outlines: Original displacement areas" << endl;
+    cout << "Red circle outlines: New displacement areas after bilateral correction" << endl;
+    cout << "Yellow arrows: Displacement vectors (both images move halfway toward each other)" << endl;
     return visualization;
 }
 
