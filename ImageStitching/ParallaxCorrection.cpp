@@ -122,24 +122,13 @@ vector<point_pair> ParallaxCorrection::findSeamFeatures(
     double overlap_ratio = 0.297; // 19.04°/64.04° from stitching profile
     vector<point_pair> all_pairs = getPointPairsFromFeatureWithDistanceConstraint(features1, features2, img1.width(), img1.height(), overlap_ratio);
 
-    // Filter features that are near the seam line
-    for (const auto& pair : all_pairs) {
-        int x1 = (int)pair.a.x;
-        int y1 = (int)pair.a.y;
-        int x2 = (int)pair.b.x;
-        int y2 = (int)pair.b.y;
+    // For 360-degree panoramas, use ALL feature pairs in the overlap region
+    // The seam line is just a reference - we want to use all features for parallax correction
+    // The overlap region is defined by the distance constraint in getPointPairsFromFeatureWithDistanceConstraint
+    // So all pairs in all_pairs are already in the overlap region
+    seam_features = all_pairs;
 
-        // Check if either feature is near the seam line
-        double dist1 = distanceToSeamLine(x1, y1, seam_line);
-        double dist2 = distanceToSeamLine(x2, y2, seam_line);
-
-        // Use larger window for 8-camera setup and be more permissive
-        if (dist1 < SEAM_DETECTION_WINDOW * 2 || dist2 < SEAM_DETECTION_WINDOW * 2) {
-            seam_features.push_back(pair);
-        }
-    }
-
-    cout << "Found " << seam_features.size() << " features near seam line" << endl;
+    cout << "Found " << seam_features.size() << " features in overlap region" << endl;
     return seam_features;
 }
 
@@ -167,29 +156,27 @@ vector<point_pair> ParallaxCorrection::findSeamFeaturesInOverlap(
     // overlap_ratio is already defined above
     int overlap_width = (int)(img_width * overlap_ratio);
 
-    // For 360-degree panorama, the overlap regions are not at the edges
-    // but rather where the images meet in the circular arrangement.
-    // Based on the debug output, features are distributed across the entire image.
-    // Let's use a more generous approach that considers the entire image as potential overlap.
+    // For 360-degree panorama with 8 cameras at 45-degree intervals,
+    // the overlap regions are at the edges where adjacent images meet.
+    // Each image overlaps with the next image on the right edge.
 
-    // For 360-degree panorama, we'll use a more generous overlap region
-    // that covers a larger portion of each image to capture more features
-    int overlap_half_width = overlap_width * 2; // Use 2x overlap width for more coverage
+    // For 360-degree panorama, we'll use the right edge of img1 and left edge of img2
+    // as the overlap regions where adjacent images meet
+    int overlap_half_width = overlap_width; // Use actual overlap width
 
-    // For 360-degree panorama, use the center portion of each image as overlap region
-    // This is where adjacent images would meet in the circular arrangement
-    int img1_overlap_start = (img_width - overlap_half_width) / 2;
-    int img1_overlap_end = (img_width + overlap_half_width) / 2;
+    // img1 overlap region: right edge (where it meets the next image)
+    int img1_overlap_start = img_width - overlap_width;
+    int img1_overlap_end = img_width;
 
-    // Overlap region in img2: center portion as well
-    int img2_overlap_start = (img_width - overlap_half_width) / 2;
-    int img2_overlap_end = (img_width + overlap_half_width) / 2;
+    // img2 overlap region: left edge (where it meets the previous image)
+    int img2_overlap_start = 0;
+    int img2_overlap_end = overlap_width;
 
     cout << "Image dimensions: " << img_width << "x" << img_height << endl;
     cout << "Overlap ratio: " << overlap_ratio << " (19.04°/64.04°)" << endl;
     cout << "Overlap width: " << overlap_width << " pixels" << endl;
-    cout << "Overlap region - img1: [" << img1_overlap_start << "-" << img1_overlap_end
-         << "], img2: [" << img2_overlap_start << "-" << img2_overlap_end << "]" << endl;
+    cout << "Overlap region - img1 (right edge): [" << img1_overlap_start << "-" << img1_overlap_end
+         << "], img2 (left edge): [" << img2_overlap_start << "-" << img2_overlap_end << "]" << endl;
 
     // Count features in each region for debugging
     int features_in_img1_overlap = 0;
@@ -237,75 +224,51 @@ vector<WarpControlPoint> ParallaxCorrection::calculateParallaxDisplacement(
 
     cout << "Calculating parallax displacement for " << seam_features.size() << " features" << endl;
 
-    // Group features by distance from seam to create control points
-    map<int, vector<point_pair>> features_by_distance;
-
+    // Create a control point for EVERY single feature match
+    // This will provide maximum warping coverage
     for (const auto& pair : seam_features) {
         int x1 = (int)pair.a.x;
         int y1 = (int)pair.a.y;
         int x2 = (int)pair.b.x;
         int y2 = (int)pair.b.y;
 
-        // Calculate average distance from seam
-        double dist1 = distanceToSeamLine(x1, y1, seam_line);
-        double dist2 = distanceToSeamLine(x2, y2, seam_line);
-        double avg_dist = (dist1 + dist2) / 2.0;
+        // Calculate displacement (difference between matched points)
+        // For parallax correction, we need to calculate the displacement within the overlap region
+        // The large displacement between features from different images is due to the circular arrangement
+        // We need to focus on the actual parallax displacement within the overlap region
 
-        int dist_bucket = (int)(avg_dist / 10) * 10;  // Group by 10-pixel buckets
-        features_by_distance[dist_bucket].push_back(pair);
-    }
+        // Calculate the displacement within the overlap region
+        // For 360-degree panoramas, features at the right edge of one image should appear
+        // at the left edge of the next image, but the parallax displacement should be small
+        double dx = x2 - x1;
+        double dy = y2 - y1;
 
-    // Create control points from grouped features
-    for (const auto& group : features_by_distance) {
-        if (group.second.size() < 3) continue;  // Need at least 3 features for reliable displacement
-
-        // Calculate average displacement for this group
-        double avg_dx = 0.0, avg_dy = 0.0;
-        int valid_pairs = 0;
-
-        for (const auto& pair : group.second) {
-            int x1 = (int)pair.a.x;
-            int y1 = (int)pair.a.y;
-            int x2 = (int)pair.b.x;
-            int y2 = (int)pair.b.y;
-
-            // Calculate displacement (difference between matched points)
-            double dx = x2 - x1;
-            double dy = y2 - y1;
-
-            // Only consider reasonable displacements
-            if (abs(dx) < image_width * MAX_DISPLACEMENT_RATIO &&
-                abs(dy) < image_height * MAX_DISPLACEMENT_RATIO) {
-                avg_dx += dx;
-                avg_dy += dy;
-                valid_pairs++;
-            }
+        // If the displacement is very large in x-direction, it's due to circular arrangement
+        // For parallax correction, we should use a much smaller displacement
+        if (abs(dx) > image_width * 0.3) {
+            // This is a circular wrap-around - scale down the x-displacement significantly
+            // and keep the y-displacement as it represents the actual parallax
+            dx = dx * 0.01; // Scale down x-displacement by 100x
+            // Keep the y-displacement as it represents the actual parallax
         }
 
-        if (valid_pairs > 0) {
-            avg_dx /= valid_pairs;
-            avg_dy /= valid_pairs;
+        // Only consider reasonable displacements
+        if (abs(dx) < image_width * MAX_DISPLACEMENT_RATIO &&
+            abs(dy) < image_height * MAX_DISPLACEMENT_RATIO) {
 
-            // Create control point at the center of this group
-            int center_x = 0, center_y = 0;
-            for (const auto& pair : group.second) {
-                center_x += (int)pair.a.x;
-                center_y += (int)pair.a.y;
-            }
-            center_x /= group.second.size();
-            center_y /= group.second.size();
-
+            // Create control point for this individual feature match
             WarpControlPoint cp;
-            cp.x = center_x;
-            cp.y = center_y;
-            cp.target_x = center_x + (int)avg_dx;
-            cp.target_y = center_y + (int)avg_dy;
-            cp.weight = min(1.0, (double)valid_pairs / 10.0);  // Weight based on feature count
+            cp.x = x1;  // Use the first image's feature position
+            cp.y = y1;
+            cp.target_x = x1 + (int)dx;  // Apply the displacement
+            cp.target_y = y1 + (int)dy;
+            cp.weight = 1.0;  // Full weight for individual features
 
             control_points.push_back(cp);
 
             cout << "Control point at (" << cp.x << "," << cp.y << ") -> ("
-                 << cp.target_x << "," << cp.target_y << ") weight=" << cp.weight << endl;
+                 << cp.target_x << "," << cp.target_y << ") weight=" << cp.weight
+                 << " displacement=(" << (cp.target_x - cp.x) << "," << (cp.target_y - cp.y) << ")" << endl;
         }
     }
 
@@ -905,4 +868,110 @@ CImg<unsigned char> ParallaxCorrection::createFeatureVisualization(
 
     cout << "Feature visualization created with dimensions " << target_width << "x" << target_height << endl;
     return visualization;
+}
+
+// Draw control points on the final stitched image
+void ParallaxCorrection::drawControlPointsOnImage(
+    CImg<unsigned char>& image,
+    const vector<WarpControlPoint>& control_points) {
+
+    cout << "Drawing " << control_points.size() << " control points on final image" << endl;
+
+    for (const auto& cp : control_points) {
+        int x = cp.x;
+        int y = cp.y;
+        int target_x = cp.target_x;
+        int target_y = cp.target_y;
+
+        // Draw control point as a red circle
+        int radius = 8;
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx*dx + dy*dy <= radius*radius) {
+                    int px = x + dx;
+                    int py = y + dy;
+                    if (px >= 0 && px < image.width() && py >= 0 && py < image.height()) {
+                        image(px, py, 0, 0) = 255; // Red
+                        image(px, py, 0, 1) = 0;   // No green
+                        image(px, py, 0, 2) = 0;   // No blue
+                    }
+                }
+            }
+        }
+
+        // Draw target point as a green circle
+        radius = 6;
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx*dx + dy*dy <= radius*radius) {
+                    int px = target_x + dx;
+                    int py = target_y + dy;
+                    if (px >= 0 && px < image.width() && py >= 0 && py < image.height()) {
+                        image(px, py, 0, 0) = 0;   // No red
+                        image(px, py, 0, 1) = 255; // Green
+                        image(px, py, 0, 2) = 0;   // No blue
+                    }
+                }
+            }
+        }
+
+        // Draw arrow from control point to target point
+        int steps = max(abs(target_x - x), abs(target_y - y));
+        for (int i = 0; i <= steps; i++) {
+            int px = x + (target_x - x) * i / steps;
+            int py = y + (target_y - y) * i / steps;
+            if (px >= 0 && px < image.width() && py >= 0 && py < image.height()) {
+                image(px, py, 0, 0) = 255; // Red
+                image(px, py, 0, 1) = 255; // Green (yellow line)
+                image(px, py, 0, 2) = 0;   // No blue
+            }
+        }
+    }
+}
+
+// Collect all control points from parallax correction
+vector<WarpControlPoint> ParallaxCorrection::collectAllControlPoints(
+    const vector<CImg<unsigned char>>& src_imgs,
+    const vector<ImageProfile>& image_profiles,
+    const vector<map<vector<float>, VlSiftKeypoint>>& features) {
+
+    vector<WarpControlPoint> all_control_points;
+
+    cout << "Collecting all control points for visualization..." << endl;
+
+    if (src_imgs.empty() || image_profiles.empty()) {
+        return all_control_points;
+    }
+
+    // Generate seam lines from profile
+    vector<SeamLine> seam_lines = generateSeamLinesFromProfile(
+        image_profiles, src_imgs[0].width(), src_imgs[0].height()
+    );
+
+    // Process each seam line to collect control points
+    for (const auto& seam : seam_lines) {
+        if (seam.image1_index >= 0 && seam.image1_index < src_imgs.size() &&
+            seam.image2_index >= 0 && seam.image2_index < src_imgs.size()) {
+
+            // Find features near this seam
+            vector<point_pair> seam_features = findSeamFeatures(
+                src_imgs[seam.image1_index], src_imgs[seam.image2_index],
+                features[seam.image1_index], features[seam.image2_index], seam
+            );
+
+            if (!seam_features.empty()) {
+                // Calculate control points for this seam
+                vector<WarpControlPoint> seam_control_points = calculateParallaxDisplacement(
+                    seam_features, seam, src_imgs[0].width(), src_imgs[0].height()
+                );
+
+                // Add to the global collection
+                all_control_points.insert(all_control_points.end(),
+                    seam_control_points.begin(), seam_control_points.end());
+            }
+        }
+    }
+
+    cout << "Collected " << all_control_points.size() << " total control points" << endl;
+    return all_control_points;
 }

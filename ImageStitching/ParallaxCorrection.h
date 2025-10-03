@@ -55,7 +55,7 @@ private:
 
     // Parameters for local warping
     static const int WARP_REGION_RADIUS = 100;  // Radius of influence for local warping
-    static constexpr double MAX_DISPLACEMENT_RATIO = 0.1;  // Maximum displacement as ratio of image size
+    static constexpr double MAX_DISPLACEMENT_RATIO = 0.8;  // Maximum displacement as ratio of image size (increased for 360-degree panoramas)
     static const int WARP_GRID_SIZE = 20;  // Grid size for local warping
 
         public:
@@ -147,6 +147,20 @@ private:
         int x, int y,
         const WarpControlPoint& control_point,
         int radius
+    );
+
+        public:
+    // Draw control points on the final stitched image
+    static void drawControlPointsOnImage(
+        CImg<unsigned char>& image,
+        const vector<WarpControlPoint>& control_points
+    );
+
+    // Collect all control points from parallax correction
+    static vector<WarpControlPoint> collectAllControlPoints(
+        const vector<CImg<unsigned char>>& src_imgs,
+        const vector<ImageProfile>& image_profiles,
+        const vector<map<vector<float>, VlSiftKeypoint>>& features
     );
 };
 

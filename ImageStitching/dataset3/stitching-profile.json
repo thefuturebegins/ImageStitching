@@ -13,8 +13,8 @@
     "projection": "rectilinear",
     "hFOV": 64.04,
     "totalImages": 8,
-    "enableFeatureMatching": false,
-    "enableFeatureVisualization": false
+    "enableFeatureMatching": true,
+    "enableFeatureVisualization": true
   },
   "images": [
     {

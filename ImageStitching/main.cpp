@@ -863,6 +863,15 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Draw control points on the final image if using profile-based stitching
+	if (profile.images.size() > 0) {
+		cout << "Drawing control points on final image..." << endl;
+		vector<WarpControlPoint> all_control_points = ParallaxCorrection::collectAllControlPoints(
+			src_imgs, profile.images, features_for_report
+		);
+		ParallaxCorrection::drawControlPointsOnImage(res, all_control_points);
+	}
+
 	res.save(filename.c_str());
 	cout << "Result saved to " << filename << endl;
 
