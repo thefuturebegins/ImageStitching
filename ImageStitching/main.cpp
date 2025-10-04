@@ -20,6 +20,8 @@
 #include "FileReading.h"
 #include "Stitching.h"
 #include "ParallaxCorrection.h"
+#include "FeatureCache.h"
+#include "CommonTypes.h"
 
 #define FILE_FOLDER "ImageStitching/dataset3/"
 
@@ -28,19 +30,7 @@ using namespace std;
 
 // Simple JSON parsing structures for stitching profile
 // ImageProfile is now defined in ParallaxCorrection.h
-
-struct StitchingProfile {
-    string mode;
-    string projection;
-    double hFOV;
-    int totalImages;
-    double angularSpacing;
-    bool enableFeatureMatching;
-    bool enableFeatureVisualization;
-    bool enableWarpingVisualization;
-    bool enableMeshWarpingVisualization;
-    vector<ImageProfile> images;
-};
+// StitchingProfile is now defined in CommonTypes.h
 
 // Forward declarations
 vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& images);
@@ -50,7 +40,7 @@ struct StitchingResult {
     vector<int> left_seam_positions;
     vector<int> right_seam_positions;
 };
-StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile);
+StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile, const string& cacheFilePath = "", bool useCache = false);
 void generateStitchingReport(const CImg<unsigned char>& result, const vector<ImageProfile>& images, const StitchingProfile& profile, const vector<map<vector<float>, VlSiftKeypoint>>& features, const vector<SeamLine>& seam_lines, const vector<int>& left_seam_positions, const vector<int>& right_seam_positions);
 
 // Simple JSON parser for stitching profile
@@ -227,9 +217,10 @@ public:
 
         // Set default values
         profile.enableFeatureMatching = true;
+        profile.enableFeatureMatchingCache = true;
         profile.enableFeatureVisualization = true;
         profile.enableWarpingVisualization = true;
-        profile.enableMeshWarpingVisualization = true;
+        profile.enableWarpingVisualization = true;
 
         // Simple direct parsing using string search
         // Parse mode
@@ -322,6 +313,19 @@ public:
             }
         }
 
+        // Parse enableFeatureMatchingCache
+        size_t featureCachePos = json.find("\"enableFeatureMatchingCache\":");
+        if (featureCachePos != string::npos) {
+            featureCachePos = json.find(":", featureCachePos);
+            if (featureCachePos != string::npos) {
+                featureCachePos = json.find_first_not_of(" \t\n\r", featureCachePos + 1);
+                if (featureCachePos != string::npos) {
+                    string valueStr = json.substr(featureCachePos, 4); // "true" or "false"
+                    profile.enableFeatureMatchingCache = (valueStr == "true");
+                }
+            }
+        }
+
         // Parse enableFeatureVisualization
         size_t featureVizPos = json.find("\"enableFeatureVisualization\":");
         if (featureVizPos != string::npos) {
@@ -356,7 +360,7 @@ public:
                 meshWarpingVizPos = json.find_first_not_of(" \t\n\r", meshWarpingVizPos + 1);
                 if (meshWarpingVizPos != string::npos) {
                     string valueStr = json.substr(meshWarpingVizPos, 4); // "true" or "false"
-                    profile.enableMeshWarpingVisualization = (valueStr == "true");
+                    profile.enableWarpingVisualization = (valueStr == "true");
                 }
             }
         }
@@ -369,9 +373,9 @@ public:
              << "', HFOV: " << profile.hFOV << ", AngularSpacing: " << profile.angularSpacing
              << ", TotalImages: " << profile.totalImages << ", Images count: " << profile.images.size()
              << ", FeatureMatching: " << (profile.enableFeatureMatching ? "enabled" : "disabled")
+             << ", FeatureMatchingCache: " << (profile.enableFeatureMatchingCache ? "enabled" : "disabled")
              << ", FeatureVisualization: " << (profile.enableFeatureVisualization ? "enabled" : "disabled")
-             << ", WarpingVisualization: " << (profile.enableWarpingVisualization ? "enabled" : "disabled")
-             << ", MeshWarpingVisualization: " << (profile.enableMeshWarpingVisualization ? "enabled" : "disabled") << endl;
+             << ", WarpingVisualization: " << (profile.enableWarpingVisualization ? "enabled" : "disabled") << endl;
 
         for (int i = 0; i < profile.images.size() && i < 3; i++) {
             cout << "  Image " << i << ": " << profile.images[i].fileName
@@ -447,7 +451,7 @@ vector<vector<int>> getAdjacentImagesFromProfile(const vector<ImageProfile>& ima
 }
 
 // Geometric stitching function for 360-degree panoramas
-StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile) {
+StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, const vector<ImageProfile>& images, const StitchingProfile& profile, const string& cacheFilePath, bool useCache) {
     cout << "Using geometric 360-degree panoramic stitching with parallax correction..." << endl;
 
     int num_images = src_imgs.size();
@@ -538,12 +542,43 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
     vector<CImg<unsigned char>> corrected_imgs;
 
     if (profile.enableFeatureMatching) {
-        // Extract features for parallax correction
-        for (int i = 0; i < num_images; i++) {
-            CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
-            features_for_parallax[i] = getFeatureFromImage(gray);
-            cout << "Extracted " << features_for_parallax[i].size() << " features from image " << i
-                 << " (" << src_imgs[i].width() << "x" << src_imgs[i].height() << ")" << endl;
+        if (useCache && !cacheFilePath.empty()) {
+            cout << "Loading features from cache..." << endl;
+            // Create dummy vectors for the cache loading (we don't need the actual file paths here)
+            vector<string> dummyImageFiles;
+            vector<ImageProfile> dummyImageProfiles;
+            StitchingProfile dummyProfile = profile;
+
+            if (FeatureCache::loadFeatureCache(cacheFilePath, features_for_parallax, dummyImageFiles, dummyImageProfiles, dummyProfile)) {
+                cout << "Successfully loaded features from cache" << endl;
+
+                // Calculate and display total feature count and per-image counts
+                int total_features = 0;
+                for (int i = 0; i < features_for_parallax.size(); i++) {
+                    total_features += features_for_parallax[i].size();
+                }
+                cout << "Total features loaded from cache: " << total_features << endl;
+                cout << "Features per image: ";
+                for (int i = 0; i < features_for_parallax.size(); i++) {
+                    cout << "Image " << i << ": " << features_for_parallax[i].size();
+                    if (i < features_for_parallax.size() - 1) cout << ", ";
+                }
+                cout << endl;
+            } else {
+                cout << "Failed to load features from cache, extracting features normally..." << endl;
+                useCache = false;
+            }
+        }
+
+        if (!useCache) {
+            // Extract features for parallax correction
+            cout << "Extracting features from images..." << endl;
+            for (int i = 0; i < num_images; i++) {
+                CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
+                features_for_parallax[i] = getFeatureFromImage(gray);
+                cout << "Extracted " << features_for_parallax[i].size() << " features from image " << i
+                     << " (" << src_imgs[i].width() << "x" << src_imgs[i].height() << ")" << endl;
+            }
         }
 
         // Test feature matching between adjacent images with distance constraint
@@ -551,6 +586,7 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
         double overlap_ratio = (profile.hFOV - profile.angularSpacing) / profile.hFOV;
         cout << "Overlap ratio: " << overlap_ratio << " (max distance constraint applied)" << endl;
 
+        int total_pairs = 0;
         for (int i = 0; i < num_images; i++) {
             int next_i = (i + 1) % num_images;
             vector<point_pair> test_pairs = getPointPairsFromFeatureWithDistanceConstraint(
@@ -561,6 +597,15 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
                 overlap_ratio
             );
             cout << "Images " << i << " <-> " << next_i << ": " << test_pairs.size() << " feature pairs" << endl;
+            total_pairs += test_pairs.size();
+        }
+
+        // Check if any feature pairs were found
+        if (total_pairs == 0) {
+            cout << "ERROR - No feature match pairs found" << endl;
+            StitchingResult error_result;
+            error_result.panorama = CImg<unsigned char>();
+            return error_result;
         }
 
         // Apply parallax correction using calculated seam lines
@@ -568,7 +613,7 @@ StitchingResult stitchingWithProfile(vector<CImg<unsigned char>> &src_imgs, cons
             src_imgs, images, features_for_parallax
         );
 
-        if (profile.enableMeshWarpingVisualization) {
+        if (profile.enableWarpingVisualization) {
             cout << "Creating mesh warping visualization..." << endl;
             CImg<unsigned char> mesh_warping_viz = ParallaxCorrection::createMeshWarpingVisualization(
                 src_imgs, images, seam_lines, features_for_parallax
@@ -862,10 +907,23 @@ int main(int argc, char **argv) {
 		cout << "Projection: " << profile.projection << ", HFOV: " << profile.hFOV << "°" << endl;
 	}
 
+	// Check if we should use cached features for the main stitching process
+	// Use the same base filename that will be used for output
+	string base_filename = "ImageStitching/res/pano3.jpg";
+	string cacheFilePath = FeatureCache::generateCacheFilePath(base_filename);
+	bool useCache = profile.enableFeatureMatchingCache && FeatureCache::isCacheValid(cacheFilePath, image_files_filtered, profile);
+
+	if (useCache) {
+		cout << "Valid cache found, will use cached features during stitching..." << endl;
+	} else if (profile.enableFeatureMatchingCache) {
+		cout << "No valid cache found, will extract features and save to cache..." << endl;
+	}
+
 	// Extract features for report generation (only if feature matching is enabled)
 	vector<map<vector<float>, VlSiftKeypoint>> features_for_report;
 	if (profile.images.size() > 0 && profile.enableFeatureMatching) {
 		features_for_report.resize(src_imgs.size());
+
 		for (int i = 0; i < src_imgs.size(); i++) {
 			CImg<unsigned char> gray = get_gray_image(src_imgs[i]);
 			features_for_report[i] = getFeatureFromImage(gray);
@@ -881,11 +939,17 @@ int main(int argc, char **argv) {
 	if (profile.images.size() > 0) {
 		// Use geometric profile-based stitching (no feature detection needed)
 		cout << "Using geometric profile-based stitching..." << endl;
-		auto result = stitchingWithProfile(src_imgs, ordered_images, profile);
+		auto result = stitchingWithProfile(src_imgs, ordered_images, profile, cacheFilePath, useCache);
 		res = result.panorama;
 		seam_lines = result.seam_lines;
 		left_seam_positions = result.left_seam_positions;
 		right_seam_positions = result.right_seam_positions;
+
+		// Check if stitching failed (empty panorama indicates error)
+		if (res.is_empty()) {
+			cout << "Stitching failed - no valid result generated" << endl;
+			return -1;
+		}
 	} else {
 		// Use traditional feature-based stitching with cylinder projection
 		cout << "Using traditional feature-based stitching..." << endl;
@@ -897,11 +961,20 @@ int main(int argc, char **argv) {
 	}
 	cout << "Stitching completed successfully!" << endl;
 
+	// Save features to cache if caching is enabled and we extracted features
+	if (profile.enableFeatureMatchingCache && !useCache && profile.images.size() > 0) {
+		cout << "Saving features to cache..." << endl;
+		if (FeatureCache::saveFeatureCache(cacheFilePath, features_for_report, image_files_filtered, ordered_images, profile)) {
+			cout << "Successfully saved features to cache" << endl;
+		} else {
+			cout << "Failed to save features to cache" << endl;
+		}
+	}
+
 	// res.display(); // Display disabled for headless operation
 	cout << "Saving result..." << endl;
 
 	// Generate unique filename with incremental suffix if file exists
-	string base_filename = "ImageStitching/res/pano3.jpg";
 	string filename = base_filename;
 	int counter = 0;
 

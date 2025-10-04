@@ -201,3 +201,7 @@ libvl.dylib
 # Makefile (generated for this platform)
 Makefile
 ImageStitching/main.cpp
+ImageStitching/res/pano*_*.jpg
+ImageStitching/res/pano*_report.json
+ImageStitching/res/pano*_cache.json
+

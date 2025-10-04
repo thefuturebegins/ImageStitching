@@ -13730,12 +13730,12 @@ namespace cimg_library_suffixed {
       const char *const calling_function;
       typedef double (*mp_func)(_cimg_math_parser&);
 
-#define _cimg_mp_is_constant(arg) (memtype[arg]==1) // Is constant?
-#define _cimg_mp_is_scalar(arg) (memtype[arg]<2) // Is scalar?
-#define _cimg_mp_is_temp(arg) (!memtype[arg]) // Is temporary scalar?
-#define _cimg_mp_is_variable(arg) (memtype[arg]==-1) // Is scalar variable?
-#define _cimg_mp_is_vector(arg) (memtype[arg]>1) // Is vector?
-#define _cimg_mp_vector_size(arg) (_cimg_mp_is_scalar(arg)?0U:(unsigned int)memtype[arg] - 1) // Vector size
+#define _cimg_mp_is_constant(arg) (memtype[(unsigned char)(arg)]==1) // Is constant?
+#define _cimg_mp_is_scalar(arg) (memtype[(unsigned char)(arg)]<2) // Is scalar?
+#define _cimg_mp_is_temp(arg) (!memtype[(unsigned char)(arg)]) // Is temporary scalar?
+#define _cimg_mp_is_variable(arg) (memtype[(unsigned char)(arg)]==-1) // Is scalar variable?
+#define _cimg_mp_is_vector(arg) (memtype[(unsigned char)(arg)]>1) // Is vector?
+#define _cimg_mp_vector_size(arg) (_cimg_mp_is_scalar(arg)?0U:(unsigned int)memtype[(unsigned char)(arg)] - 1) // Vector size
 #define _cimg_mp_calling_function calling_function_s()._data
 #define _cimg_mp_check_type(arg,n_arg,s_op,mode,N) check_type(arg,n_arg,s_op,mode,N,ss,se,saved_char)
 #define _cimg_mp_check_constant(arg,n_arg,s_op,is_strict) check_constant(arg,n_arg,s_op,is_strict,ss,se,saved_char)
@@ -14011,7 +14011,7 @@ namespace cimg_library_suffixed {
         if (ss1==se) switch (*ss) { // One-char variable
           case 't' : case 'w' : case 'h' : case 'd' : case 's' : case 'r' :
           case 'x' : case 'y' : case 'z' : case 'c' : case 'e' :
-            _cimg_mp_return(reserved_label[*ss]);
+            _cimg_mp_return(reserved_label[(unsigned char)*ss]);
           case 'u' :
             if (reserved_label['u']!=~0U) _cimg_mp_return(reserved_label['u']);
             _cimg_mp_scalar2(mp_u,0,1);
@@ -14113,7 +14113,7 @@ namespace cimg_library_suffixed {
 
             // Assign image value (direct).
             if (l_variable_name>2 && (*ss=='i' || *ss=='j' || *ss=='I' || *ss=='J') && (*ss1=='(' || *ss1=='[') &&
-                (reserved_label[*ss]==~0U || *ss1=='(' || !_cimg_mp_is_vector(reserved_label[*ss]))) {
+                (reserved_label[(unsigned char)*ss]==~0U || *ss1=='(' || !_cimg_mp_is_vector(reserved_label[(unsigned char)*ss]))) {
               is_relative = *ss=='j' || *ss=='J';
 
               if (*ss1=='[' && *ve1==']') { // i/j/I/J[_#ind,offset] = value
@@ -14278,7 +14278,7 @@ namespace cimg_library_suffixed {
                   cimglist_for(variable_def,i) if (!std::strcmp(variable_name,variable_def[i])) {
                     arg1 = variable_pos[i]; break;
                   }
-                } else arg1 = reserved_label[*variable_name]; // Single-char variable
+                } else arg1 = reserved_label[(unsigned char)*variable_name]; // Single-char variable
                 if (arg1==~0U) compile(ss,s0 - 1,depth1,0); // Variable does not exist -> error
                 else { // Variable already exists
                   if (_cimg_mp_is_scalar(arg1)) compile(ss,s,depth1,0); // Variable is not a vector -> error
@@ -14432,7 +14432,7 @@ namespace cimg_library_suffixed {
               arg1 = ~0U;
               arg2 = compile(s + 1,se,depth1,0);
               if (!variable_name[1]) // One-char variable, or variable in reserved_labels
-                arg1 = reserved_label[*variable_name];
+                arg1 = reserved_label[(unsigned char)*variable_name];
               else // Multi-char variable name : check for existing variable with same name
                 cimglist_for(variable_def,i)
                   if (!std::strcmp(variable_name,variable_def[i])) { arg1 = variable_pos[i]; break; }
@@ -14446,7 +14446,7 @@ namespace cimg_library_suffixed {
                   memtype[arg1] = -1;
                 }
 
-                if (!variable_name[1]) reserved_label[*variable_name] = arg1;
+                if (!variable_name[1]) reserved_label[(unsigned char)*variable_name] = arg1;
                 else {
                   if (variable_def._width>=variable_pos._width) variable_pos.resize(-200,1,1,1,0);
                   variable_pos[variable_def._width] = arg1;
@@ -15386,7 +15386,7 @@ namespace cimg_library_suffixed {
           is_relative = *ss=='j' || *ss=='J';
 
           if ((*ss=='I' || *ss=='J') && *ss1=='[' &&
-              (reserved_label[*ss]==~0U || !_cimg_mp_is_vector(reserved_label[*ss]))) { // Image value as a vector
+              (reserved_label[(unsigned char)*ss]==~0U || !_cimg_mp_is_vector(reserved_label[(unsigned char)*ss]))) { // Image value as a vector
             if (*ss2=='#') { // Index specified
               s0 = ss3; while (s0<se1 && (*s0!=',' || level[s0 - expr._data]!=clevel1)) ++s0;
               p1 = compile(ss3,s0++,depth1,0);
@@ -15421,7 +15421,7 @@ namespace cimg_library_suffixed {
           }
 
           if ((*ss=='i' || *ss=='j') && *ss1=='[' &&
-              (reserved_label[*ss]==~0U || !_cimg_mp_is_vector(reserved_label[*ss]))) { // Image value as a scalar
+              (reserved_label[(unsigned char)*ss]==~0U || !_cimg_mp_is_vector(reserved_label[(unsigned char)*ss]))) { // Image value as a scalar
             if (*ss2=='#') { // Index specified
               s0 = ss3; while (s0<se1 && (*s0!=',' || level[s0 - expr._data]!=clevel1)) ++s0;
               p1 = compile(ss3,s0++,depth1,0);
@@ -16713,8 +16713,8 @@ namespace cimg_library_suffixed {
         if (variable_name[1]) { // Multi-char variable
           cimglist_for(variable_def,i) if (!std::strcmp(variable_name,variable_def[i]))
             _cimg_mp_return(variable_pos[i]);
-        } else if (reserved_label[*variable_name]!=~0U) // Single-char variable
-          _cimg_mp_return(reserved_label[*variable_name]);
+        } else if (reserved_label[(unsigned char)*variable_name]!=~0U) // Single-char variable
+          _cimg_mp_return(reserved_label[(unsigned char)*variable_name]);
 
         // Reached an unknown item -> error.
         is_sth = true; // is_valid_variable_name
@@ -45998,7 +45998,7 @@ namespace cimg_library_suffixed {
       std::FILE *file = 0;
       const CImg<charT> s_filename = CImg<charT>::string(filename)._system_strescape();
 #if cimg_OS==1
-      cimg_snprintf(command,command._width,"%s convert \"%s\" pnm:-",
+      cimg_snprintf(command,command._width,"%s magick \"%s\" pnm:-",
                     cimg::graphicsmagick_path(),s_filename.data());
       file = popen(command,"r");
       if (file) {
@@ -46021,7 +46021,7 @@ namespace cimg_library_suffixed {
                       cimg::temporary_path(),cimg_file_separator,cimg::filenamerand());
         if ((file=std::fopen(filename_tmp,"rb"))!=0) cimg::fclose(file);
       } while (file);
-      cimg_snprintf(command,command._width,"%s convert \"%s\" \"%s\"",
+      cimg_snprintf(command,command._width,"%s magick \"%s\" \"%s\"",
                     cimg::graphicsmagick_path(),s_filename.data(),
                     CImg<charT>::string(filename_tmp)._system_strescape().data());
       cimg::system(command,cimg::graphicsmagick_path());
@@ -49593,7 +49593,7 @@ namespace cimg_library_suffixed {
 #else
       save_pnm(filename_tmp);
 #endif
-      cimg_snprintf(command,command._width,"%s convert -quality %u \"%s\" \"%s\"",
+      cimg_snprintf(command,command._width,"%s magick -quality %u \"%s\" \"%s\"",
                     cimg::graphicsmagick_path(),quality,
                     CImg<charT>::string(filename_tmp)._system_strescape().data(),
                     CImg<charT>::string(filename)._system_strescape().data());
@@ -53239,7 +53239,7 @@ namespace cimg_library_suffixed {
         if ((file=std::fopen(filename_tmp2,"rb"))!=0) cimg::fclose(file);
       } while (file);
 #if cimg_OS!=2
-      if (use_graphicsmagick) cimg_snprintf(command,command._width,"%s convert \"%s\" \"%s.png\" >/dev/null 2>&1",
+      if (use_graphicsmagick) cimg_snprintf(command,command._width,"%s magick \"%s\" \"%s.png\" >/dev/null 2>&1",
                                             cimg::graphicsmagick_path(),
                                             CImg<charT>::string(filename)._system_strescape().data(),
                                             CImg<charT>::string(filename_tmp)._system_strescape().data());
@@ -53248,7 +53248,7 @@ namespace cimg_library_suffixed {
                          CImg<charT>::string(filename)._system_strescape().data(),
                          CImg<charT>::string(filename_tmp)._system_strescape().data());
 #else
-      if (use_graphicsmagick) cimg_snprintf(command,command._width,"\"%s convert \"%s\" \"%s.png\"\" >NUL 2>&1",
+      if (use_graphicsmagick) cimg_snprintf(command,command._width,"\"%s magick \"%s\" \"%s.png\"\" >NUL 2>&1",
                                             cimg::graphicsmagick_path(),
                                             CImg<charT>::string(filename)._system_strescape().data(),
                                             CImg<charT>::string(filename_tmp)._system_strescape().data());
@@ -54888,10 +54888,14 @@ namespace cimg {
       if (!path_found) std::strcpy(s_path,"convert.exe");
 #else
       if (!path_found) {
-        std::strcpy(s_path,"./convert");
+        std::strcpy(s_path,"./magick");
         if ((file=std::fopen(s_path,"r"))!=0) { cimg::fclose(file); path_found = true; }
       }
-      if (!path_found) std::strcpy(s_path,"convert");
+      if (!path_found) {
+        std::strcpy(s_path,"magick");
+        if ((file=std::fopen(s_path,"r"))!=0) { cimg::fclose(file); path_found = true; }
+      }
+      if (!path_found) std::strcpy(s_path,"magick");
 #endif
       winformat_string(s_path);
     }

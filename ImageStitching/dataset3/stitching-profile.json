@@ -14,6 +14,7 @@
     "hFOV": 64.04,
     "totalImages": 8,
     "enableFeatureMatching": true,
+    "enableFeatureMatchingCache": true,
     "enableFeatureVisualization": true,
     "enableWarpingVisualization": false,
     "enableMeshWarpingVisualization": true

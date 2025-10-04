@@ -13,6 +13,11 @@ float getYAfterWarping(float x, float y, Parameters H) {
 }
 
 vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b) {
+	// Check if either feature map is empty - return empty result if so
+	if (feature_a.empty() || feature_b.empty()) {
+		return vector<point_pair>();
+	}
+
 	VlKDForest* forest = vl_kdforest_new(VL_TYPE_FLOAT, 128, 1, VlDistanceL1);
 
 	float *data = new float[128 * feature_a.size()];
@@ -82,6 +87,12 @@ vector<point_pair> getPointPairsFromFeature(const map<vector<float>, VlSiftKeypo
 }
 
 vector<point_pair> getPointPairsFromFeatureWithDistanceConstraint(const map<vector<float>, VlSiftKeypoint> &feature_a, const map<vector<float>, VlSiftKeypoint> &feature_b, int img_width, int img_height, double overlap_ratio) {
+	// Check if either feature map is empty - return empty result if so
+	if (feature_a.empty() || feature_b.empty()) {
+		cout << "Distance-constrained matching: 0 pairs (from " << feature_b.size() << " features) - empty feature map" << endl;
+		return vector<point_pair>();
+	}
+
 	VlKDForest* forest = vl_kdforest_new(VL_TYPE_FLOAT, 128, 1, VlDistanceL1);
 
 	float *data = new float[128 * feature_a.size()];
